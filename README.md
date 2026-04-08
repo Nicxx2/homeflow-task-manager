@@ -72,11 +72,9 @@ The assistant is bounded to app-related actions only and uses explicit confirmat
 
 ---
 
-## Docker image
+## 🔗 Docker Hub Repository
 
-Docker Hub image:
-
-`nicxx2/homeflow-task-manager:latest`
+👉 [https://hub.docker.com/r/nicxx2/homeflow-task-manager](https://hub.docker.com/r/nicxx2/homeflow-task-manager)
 
 ---
 
