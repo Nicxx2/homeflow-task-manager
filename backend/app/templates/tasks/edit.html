@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="mb-6">
+  <h1 class="text-2xl font-semibold">Edit Task</h1>
+  <p class="text-slate-500 dark:text-slate-400">{{ task.title }}</p>
+</header>
+
+<form method="post" action="/tasks/{{ task.id }}/edit" class="space-y-4 max-w-2xl bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800">
+  {% if form_error %}
+    <div class="rounded-md bg-red-50 border border-red-100 text-red-700 px-3 py-2 text-sm">{{ form_error }}</div>
+  {% endif %}
+  <div>
+    <label class="block text-sm mb-1">Title</label>
+    <input name="title" value="{{ task.title }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
+  </div>
+  <div>
+    <label class="block text-sm mb-1">Description</label>
+    <textarea name="description" rows="4" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required>{{ task.description }}</textarea>
+  </div>
+  <div>
+    <label class="block text-sm mb-1">Due date</label>
+    <input type="date" name="due_date" value="{{ task.due_date }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
+  </div>
+  <div>
+    <label class="block text-sm mb-1">Effort level</label>
+    <select name="effort_level" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+      {% for level in levels %}
+      <option value="{{ level.value }}" {% if task.effort_level == level %}selected{% endif %}>{{ level.value|upper }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="block text-sm mb-1">Status</label>
+    <select name="status_value" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+      {% for item in statuses %}
+      <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="flex gap-3">
+    <button class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700" type="submit">Save Changes</button>
+    <a href="/tasks/{{ task.id }}" class="text-slate-600 hover:underline py-2">Cancel</a>
+  </div>
+</form>
+{% endblock %}

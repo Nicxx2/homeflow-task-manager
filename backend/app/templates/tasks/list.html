@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="flex items-center justify-between mb-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Tasks</h1>
+    <p class="text-slate-500 dark:text-slate-400">Browse and open tasks to edit details or assign work.</p>
+  </div>
+  <a href="/tasks/new" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">New Task</a>
+</header>
+
+<section class="bg-white rounded-xl border border-slate-200 overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+      <tr>
+        <th class="text-left px-4 py-3">Title</th>
+        <th class="text-left px-4 py-3">Due</th>
+        <th class="text-left px-4 py-3">Effort</th>
+        <th class="text-left px-4 py-3">Points</th>
+        <th class="text-left px-4 py-3">Status</th>
+        <th class="text-left px-4 py-3">Assignment</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr class="border-t border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
+        <td class="px-4 py-3"><a class="text-indigo-600 hover:underline dark:text-indigo-300 dark:hover:text-indigo-200" href="/tasks/{{ task.id }}">{{ task.title }}</a></td>
+        <td class="px-4 py-3">{{ task.due_date }}</td>
+        <td class="px-4 py-3 uppercase">{{ task.effort_level.value }}</td>
+        <td class="px-4 py-3">{{ task.points_value }}</td>
+        <td class="px-4 py-3">
+          {% if user.is_admin or task.assignee_id == user.id %}
+          <form method="post" action="/tasks/{{ task.id }}/status">
+            <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+            <select
+              name="status_value"
+              onchange="this.form.submit()"
+              class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+            >
+              {% for item in statuses %}
+              <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% else %}
+          <span class="text-slate-700 dark:text-slate-300">{{ task.status.value }}</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3">
+          {% if task.assignee_id %}
+            {{ task.assignment_date or "-" }}
+          {% else %}
+            <span class="text-slate-500 dark:text-slate-400">Unassigned</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td class="px-4 py-5 text-slate-500 dark:text-slate-400" colspan="6">No tasks yet. Create a task to get started.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

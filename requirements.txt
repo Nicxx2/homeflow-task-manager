@@ -1,0 +1,14 @@
+fastapi==0.116.0
+uvicorn[standard]==0.35.0
+SQLAlchemy==2.0.41
+alembic==1.16.4
+psycopg[binary]==3.2.9
+pydantic-settings==2.10.1
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+python-multipart==0.0.20
+jinja2==3.1.6
+httpx==0.28.1
+pytest==8.3.5
+email-validator==2.2.0

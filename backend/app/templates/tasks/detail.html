@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="flex items-center justify-between mb-6">
+  <div>
+    <h1 class="text-2xl font-semibold">{{ task.title }}</h1>
+    <p class="text-slate-500 dark:text-slate-400">Task details and assignment</p>
+  </div>
+  {% if can_manage_task %}
+  <a href="/tasks/{{ task.id }}/edit" class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Edit</a>
+  {% endif %}
+</header>
+
+<section class="bg-white rounded-xl border border-slate-200 p-5 space-y-3 dark:bg-slate-900 dark:border-slate-800">
+  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Task summary</h2>
+  <p><span class="text-slate-500">Description:</span> {{ task.description }}</p>
+  <p><span class="text-slate-500">Due date:</span> {{ task.due_date }}</p>
+  <p><span class="text-slate-500">Effort:</span> {{ task.effort_level.value }}</p>
+  <p><span class="text-slate-500">Points:</span> {{ task.points_value }}</p>
+  <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <p><span class="text-slate-500">Status:</span> {{ task.status.value }}</p>
+    {% if can_update_status %}
+    <form method="post" action="/tasks/{{ task.id }}/status" class="flex items-center gap-2">
+      <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+      <select
+        name="status_value"
+        onchange="this.form.submit()"
+        class="rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+      >
+        {% for item in statuses %}
+        <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+        {% endfor %}
+      </select>
+      <span class="text-xs text-slate-500 dark:text-slate-400">Updates immediately</span>
+    </form>
+    {% endif %}
+  </div>
+  <p>
+    <span class="text-slate-500">Assignee:</span>
+    {% if task.assignee %}
+      {{ task.assignee.full_name }}{% if not task.assignee.show_in_member_lists %} (hidden from member lists){% endif %}
+    {% else %}
+      Unassigned
+    {% endif %}
+  </p>
+  <p><span class="text-slate-500">Assignment date:</span> {{ task.assignment_date or "-" }}</p>
+  <hr class="my-3 border-slate-200 dark:border-slate-800">
+  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">AI effort analysis</h2>
+  <p><span class="text-slate-500">Suggested effort:</span> {{ task.ai_suggested_level.value if task.ai_suggested_level else "-" }}</p>
+  <p><span class="text-slate-500">Confidence:</span> {{ task.ai_confidence or "-" }}</p>
+  <p><span class="text-slate-500">Reason:</span> {{ task.ai_reason or "-" }}</p>
+  <p><span class="text-slate-500">Source:</span>
+    {% if task.fallback_used %}
+    Rules fallback
+    {% else %}
+    {{ task.ai_provider_used or "-" }} / {{ task.ai_model_used or "-" }}
+    {% endif %}
+  </p>
+</section>
+
+{% if can_manage_task %}
+<section class="bg-white rounded-xl border border-slate-200 p-5 mt-5 dark:bg-slate-900 dark:border-slate-800">
+  <h2 class="font-medium mb-1">Assign Task</h2>
+  <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Assignment is a separate step from task creation.</p>
+  <form method="post" action="/tasks/{{ task.id }}/assign" class="space-y-4">
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Assignee</label>
+        <select
+          name="assignee_id"
+          id="assignee_id"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          required
+          hx-get="/tasks/{{ task.id }}/assignment-check"
+          hx-trigger="change"
+          hx-include="#assignee_id,#assignment_date"
+          hx-target="#assignment-feedback"
+        >
+          <option value="">Select a user</option>
+          {% for item in all_users %}
+          <option value="{{ item.id }}" {% if assignment_feedback and assignment_feedback.selected_assignee_id == item.id %}selected{% elif task.assignee_id == item.id %}selected{% endif %}>
+            {{ item.full_name }} ({{ item.email }}){% if not item.show_in_member_lists %} - hidden{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Assignment date</label>
+        <input
+          type="date"
+          id="assignment_date"
+          name="assignment_date"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          value="{{ assignment_feedback.selected_assignment_date if assignment_feedback else (task.assignment_date or task.due_date) }}"
+          required
+          hx-get="/tasks/{{ task.id }}/assignment-check"
+          hx-trigger="change"
+          hx-include="#assignee_id,#assignment_date"
+          hx-target="#assignment-feedback"
+        />
+      </div>
+    </div>
+
+    <div class="text-sm text-slate-600 dark:text-slate-300">
+      This task uses <span class="font-medium">{{ task.points_value }} points</span> on the selected assignment day.
+    </div>
+    <div id="assignment-feedback">
+      {% include "tasks/partials/assignment_feedback.html" with context %}
+    </div>
+
+    <button class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700" type="submit">
+      Save assignment
+    </button>
+  </form>
+  {% if task.assignee_id %}
+  <form method="post" action="/tasks/{{ task.id }}/unassign" class="mt-3">
+    <button class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Remove assignment</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

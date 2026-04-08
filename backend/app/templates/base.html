@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title or "Simple Task Management" }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: "class" };
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script>
+    function resolveThemePreference(pref) {
+      if (pref === "system") {
+        return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      return pref === "dark" ? "dark" : "light";
+    }
+
+    function applyThemePreference(pref) {
+      const root = document.documentElement;
+      const resolved = resolveThemePreference(pref);
+      root.classList.toggle("dark", resolved === "dark");
+      root.dataset.themePreference = pref;
+    }
+
+    (function initThemePreference() {
+      const pref = "{{ (user.theme_preference if user is defined and user else 'light') or 'light' }}";
+      applyThemePreference(pref);
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function() {
+        const current = document.documentElement.dataset.themePreference || "light";
+        if (current === "system") {
+          applyThemePreference("system");
+        }
+      });
+    })();
+  </script>
+</head>
+<body class="h-full min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    {% if show_nav is not defined or show_nav %}
+      <nav class="mb-6 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+        <div class="flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/dashboard">Dashboard</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/tasks">Tasks</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/tasks/new">Create</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/day-view">Day View</a>
+          {% if user is defined and user and user.is_admin %}
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/admin">Admin</a>
+          {% endif %}
+          {% if user is defined and user %}
+          <div class="ml-auto flex items-center gap-2">
+            <form method="post" action="/preferences/theme" class="flex items-center gap-2">
+              <label for="theme_preference" class="text-xs text-slate-500 dark:text-slate-400">Theme</label>
+              <select
+                id="theme_preference"
+                name="theme_preference"
+                onchange="applyThemePreference(this.value); this.form.submit();"
+                class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <option value="light" {% if (user.theme_preference or "light") == "light" %}selected{% endif %}>Light</option>
+                <option value="dark" {% if user.theme_preference == "dark" %}selected{% endif %}>Dark</option>
+                <option value="system" {% if user.theme_preference == "system" %}selected{% endif %}>System</option>
+              </select>
+            </form>
+            <form method="post" action="/logout">
+              <button class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Logout</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </nav>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  {% if user is defined and user %}
+  <button
+    id="assistant-toggle"
+    type="button"
+    class="fixed bottom-5 right-5 z-40 rounded-full bg-indigo-600 px-4 py-3 text-sm font-medium text-white shadow-lg transition hover:bg-indigo-700"
+  >
+    Ask AI
+  </button>
+
+  <section
+    id="assistant-panel"
+    class="fixed bottom-20 right-5 z-40 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+  >
+    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+      <div>
+        <h2 class="text-sm font-semibold">Task AI</h2>
+        <p class="text-xs text-slate-500 dark:text-slate-400">App-only help. No admin changes.</p>
+      </div>
+      <button
+        id="assistant-close"
+        type="button"
+        class="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+      >
+        Close
+      </button>
+    </div>
+
+    <div id="assistant-messages" class="max-h-96 space-y-3 overflow-y-auto px-4 py-4"></div>
+    <div id="assistant-suggestions" class="flex flex-wrap gap-2 px-4 pb-3"></div>
+
+    <form id="assistant-form" class="border-t border-slate-200 px-4 py-3 dark:border-slate-800">
+      <label for="assistant-input" class="sr-only">Ask the task assistant</label>
+      <div class="flex gap-2">
+        <input
+          id="assistant-input"
+          name="message"
+          type="text"
+          placeholder="Ask about tasks or capacity"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        />
+        <button
+          id="assistant-send"
+          type="submit"
+          class="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700"
+        >
+          Send
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <script>
+    (function initTaskAssistant() {
+      const toggle = document.getElementById("assistant-toggle");
+      const panel = document.getElementById("assistant-panel");
+      const closeButton = document.getElementById("assistant-close");
+      const form = document.getElementById("assistant-form");
+      const input = document.getElementById("assistant-input");
+      const sendButton = document.getElementById("assistant-send");
+      const messages = document.getElementById("assistant-messages");
+      const suggestions = document.getElementById("assistant-suggestions");
+      let recentItems = [];
+      let pendingRequest = false;
+
+      if (!toggle || !panel || !closeButton || !form || !input || !sendButton || !messages || !suggestions) {
+        return;
+      }
+
+      const initialSuggestions = [
+        "List low tasks",
+        "Who has the most capacity left?",
+        "Who has enough capacity for one high task?",
+        "Add me to any low task available",
+      ];
+
+      function appendBubble(role, text) {
+        const bubble = document.createElement("div");
+        bubble.className = role === "user"
+          ? "ml-auto max-w-[85%] rounded-2xl bg-indigo-600 px-3 py-2 text-sm text-white"
+          : "max-w-[90%] rounded-2xl bg-slate-100 px-3 py-2 text-sm text-slate-800 dark:bg-slate-800 dark:text-slate-100";
+        bubble.textContent = text;
+        messages.appendChild(bubble);
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      function setPendingState(isPending) {
+        pendingRequest = isPending;
+        sendButton.disabled = isPending;
+        input.disabled = isPending;
+        sendButton.classList.toggle("opacity-60", isPending);
+        sendButton.classList.toggle("cursor-not-allowed", isPending);
+      }
+
+      function clearSuggestions() {
+        suggestions.replaceChildren();
+      }
+
+      function renderSuggestions(values) {
+        clearSuggestions();
+        values.forEach(function(value) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+          button.textContent = value;
+          button.addEventListener("click", function() {
+            input.value = value;
+            input.focus();
+          });
+          suggestions.appendChild(button);
+        });
+      }
+
+      function appendItem(item) {
+        const card = document.createElement("div");
+        card.className = "rounded-xl border border-slate-200 px-3 py-3 text-sm dark:border-slate-700";
+
+        const title = document.createElement("p");
+        title.className = "font-medium";
+        title.textContent = item.title;
+        card.appendChild(title);
+
+        if (item.meta) {
+          const meta = document.createElement("p");
+          meta.className = "mt-1 text-xs text-slate-500 dark:text-slate-400";
+          meta.textContent = item.meta;
+          card.appendChild(meta);
+        }
+
+        if (item.action && item.action.type === "assign_self") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "mt-3 rounded-md bg-emerald-600 px-3 py-2 text-xs text-white hover:bg-emerald-700";
+          button.textContent = item.action.label;
+          button.addEventListener("click", function() {
+            runAction(item.action);
+          });
+          card.appendChild(button);
+        }
+
+        messages.appendChild(card);
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      async function requestJson(url, formData) {
+        let response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            body: formData,
+            credentials: "same-origin",
+          });
+        } catch (error) {
+          return { ok: false, payload: { reply: "The assistant request failed. Check your connection and try again." } };
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          if (response.status === 401 || response.status === 403) {
+            return { ok: false, payload: { reply: "Your session may have expired. Reload the page and sign in again if needed." } };
+          }
+          return { ok: false, payload: { reply: "The assistant returned an unexpected response. Reload and try again." } };
+        }
+
+        try {
+          const payload = await response.json();
+          if (!response.ok && !payload.reply) {
+            payload.reply = "The assistant could not complete that request.";
+          }
+          return { ok: response.ok, payload };
+        } catch (error) {
+          return { ok: false, payload: { reply: "The assistant response could not be read. Reload and try again." } };
+        }
+      }
+
+      async function runAction(action) {
+        if (pendingRequest) {
+          return;
+        }
+        const formData = new FormData();
+        formData.append("task_id", String(action.task_id));
+        formData.append("assignment_date", action.assignment_date);
+        setPendingState(true);
+        try {
+          const result = await requestJson("/assistant/actions/assign-self", formData);
+          appendBubble("assistant", result.payload.reply);
+          if (result.ok && result.payload.ok) {
+            window.setTimeout(function() {
+              window.location.reload();
+            }, 700);
+          }
+        } finally {
+          setPendingState(false);
+        }
+      }
+
+      async function sendMessage(message) {
+        if (!message.trim() || pendingRequest) {
+          return;
+        }
+
+        appendBubble("user", message);
+        input.value = "";
+
+        const formData = new FormData();
+        formData.append("message", message);
+        formData.append("context_json", JSON.stringify(recentItems));
+
+        setPendingState(true);
+        try {
+          const result = await requestJson("/assistant/chat", formData);
+          const payload = result.payload;
+          appendBubble("assistant", payload.reply);
+          recentItems = payload.items || [];
+          recentItems.forEach(appendItem);
+          renderSuggestions(payload.suggestions || initialSuggestions);
+        } finally {
+          setPendingState(false);
+        }
+      }
+
+      toggle.addEventListener("click", function() {
+        panel.classList.remove("hidden");
+        input.focus();
+      });
+
+      closeButton.addEventListener("click", function() {
+        panel.classList.add("hidden");
+      });
+
+      form.addEventListener("submit", function(event) {
+        event.preventDefault();
+        sendMessage(input.value);
+      });
+
+      appendBubble("assistant", "Ask me about tasks or capacity in this app. I can also prepare a self-assignment for you to confirm.");
+      renderSuggestions(initialSuggestions);
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

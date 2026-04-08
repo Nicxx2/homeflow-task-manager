@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="flex items-center justify-between mb-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Day View</h1>
+    <p class="text-slate-500 dark:text-slate-400">
+      {% if scope == "team" %}
+        Team workload and capacity for the selected day.
+      {% else %}
+        Your workload and capacity for the selected day.
+      {% endif %}
+    </p>
+  </div>
+  <form method="get" action="/day-view" class="flex items-center gap-2">
+    <input type="date" name="day" value="{{ target_day }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+    <input type="hidden" name="scope" value="{{ scope }}" />
+    <button class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Go</button>
+  </form>
+</header>
+
+<section class="mb-4 flex items-center gap-2">
+  <a
+    href="/day-view?day={{ target_day }}&scope=team"
+    class="rounded-md px-3 py-2 text-sm {% if scope == 'team' %}bg-indigo-600 text-white{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+  >
+    Everyone
+  </a>
+  <a
+    href="/day-view?day={{ target_day }}&scope=mine"
+    class="rounded-md px-3 py-2 text-sm {% if scope == 'mine' %}bg-indigo-600 text-white{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+  >
+    Just mine
+  </a>
+</section>
+
+<section class="space-y-4">
+  {% for row in rows %}
+  <article class="bg-white rounded-xl border border-slate-200 p-4 dark:bg-slate-900 dark:border-slate-800">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-medium">{{ row.member.full_name }}</h2>
+      <div class="text-right text-sm text-slate-600 dark:text-slate-300">
+        <p>{{ row.points }} / {{ row.capacity if row.capacity is not none else "not set" }} pts</p>
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          {% if row.remaining_capacity is none %}
+            Remaining unavailable
+          {% elif row.remaining_capacity >= 0 %}
+            {{ row.remaining_capacity }} pts left
+          {% else %}
+            {{ row.remaining_capacity | abs }} pts over
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    <div class="space-y-2">
+      {% for item in row.tasks %}
+      <div class="border border-slate-200 rounded-md px-3 py-2 dark:border-slate-700">
+        {% if item.can_open %}
+        <a href="/tasks/{{ item.task.id }}" class="block hover:bg-slate-50 dark:hover:bg-slate-800">
+          <p class="text-sm font-medium">{{ item.task.title }}</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">{{ item.task.points_value }} pts | {{ item.task.status.value }}</p>
+        </a>
+        {% if item.can_update_status %}
+        <form method="post" action="/tasks/{{ item.task.id }}/status" class="mt-2">
+          <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+          <select
+            name="status_value"
+            onchange="this.form.submit()"
+            class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+          >
+            {% for status in statuses %}
+            <option value="{{ status.value }}" {% if item.task.status == status %}selected{% endif %}>{{ status.value }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        {% endif %}
+        {% else %}
+        <p class="text-sm font-medium">{{ item.task.title }}</p>
+        <p class="text-xs text-slate-500 dark:text-slate-400">{{ item.task.points_value }} pts | {{ item.task.status.value }}</p>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-500 dark:text-slate-400">No tasks assigned for this day.</p>
+      {% endfor %}
+    </div>
+  </article>
+  {% else %}
+  <p class="text-sm text-slate-500 dark:text-slate-400">No users available.</p>
+  {% endfor %}
+</section>
+{% endblock %}

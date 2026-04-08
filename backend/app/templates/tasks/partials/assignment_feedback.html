@@ -1,0 +1,23 @@
+{% set data = feedback if feedback is defined else assignment_feedback %}
+{% if not data %}
+<p class="text-sm text-slate-500 dark:text-slate-400">Choose a user and date to preview workload impact before saving.</p>
+{% elif data.valid %}
+<div class="rounded-md border border-emerald-200 bg-emerald-50 p-3 space-y-1 text-sm dark:border-emerald-900/40 dark:bg-emerald-950/30">
+  <p class="font-medium text-emerald-800">This assignment fits daily capacity.</p>
+  <p class="text-emerald-900 dark:text-emerald-200">Current used points: {{ data.current_points }}</p>
+  <p class="text-emerald-900 dark:text-emerald-200">Task points to add: {{ data.task_points }}</p>
+  <p class="text-emerald-900 dark:text-emerald-200">Projected total: {{ data.projected_points }} / {{ data.capacity }}</p>
+</div>
+{% else %}
+<div class="rounded-md border border-red-200 bg-red-50 p-3 space-y-1 text-sm dark:border-red-900/40 dark:bg-red-950/30">
+  <p class="font-medium text-red-800">This assignment would exceed daily capacity.</p>
+  <p class="text-red-900 dark:text-red-200">Current used points: {{ data.current_points }}</p>
+  <p class="text-red-900 dark:text-red-200">Task points to add: {{ data.task_points }}</p>
+  <p class="text-red-900 dark:text-red-200">Projected total: {{ data.projected_points }} / {{ data.capacity if data.capacity is not none else "not set" }}</p>
+  {% if data.next_available_date %}
+  <p class="text-red-900 dark:text-red-200">Try this next available date: <span class="font-medium">{{ data.next_available_date }}</span></p>
+  {% else %}
+  <p class="text-red-900 dark:text-red-200">No suitable date was found in the next 30 days.</p>
+  {% endif %}
+</div>
+{% endif %}

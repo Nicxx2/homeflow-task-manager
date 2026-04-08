@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="min-h-[70vh] grid place-items-center">
+  <div class="w-full max-w-4xl grid gap-6 md:grid-cols-2">
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 dark:bg-slate-900 dark:border-slate-800">
+      <h1 class="text-2xl font-semibold mb-1">Welcome back</h1>
+      <p class="text-slate-500 dark:text-slate-400 mb-6">Sign in to continue managing tasks.</p>
+
+      {% if error %}
+        <div class="mb-4 rounded-md bg-red-50 text-red-700 px-3 py-2 text-sm">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login" class="space-y-4">
+        <div>
+          <label class="block text-sm text-slate-700 dark:text-slate-300 mb-1" for="email">Email</label>
+          <input class="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" id="email" name="email" type="email" required />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-700 dark:text-slate-300 mb-1" for="password">Password</label>
+          <input class="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" id="password" name="password" type="password" required />
+        </div>
+        <button class="w-full bg-indigo-600 text-white rounded-md py-2 hover:bg-indigo-700 transition" type="submit">
+          Sign in
+        </button>
+      </form>
+    </section>
+
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 dark:bg-slate-900 dark:border-slate-800">
+      <h2 class="text-2xl font-semibold mb-1">Create an account</h2>
+      <p class="text-slate-500 dark:text-slate-400 mb-6">New accounts require admin approval before they can sign in.</p>
+
+      {% if register_success %}
+        <div class="mb-4 rounded-md bg-emerald-50 text-emerald-700 px-3 py-2 text-sm">{{ register_success }}</div>
+      {% endif %}
+      {% if register_error %}
+        <div class="mb-4 rounded-md bg-red-50 text-red-700 px-3 py-2 text-sm">{{ register_error }}</div>
+      {% endif %}
+
+      <form method="post" action="/register" class="space-y-4">
+        <div>
+          <label class="block text-sm text-slate-700 dark:text-slate-300 mb-1" for="register_full_name">Full name</label>
+          <input class="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" id="register_full_name" name="full_name" type="text" minlength="2" required />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-700 dark:text-slate-300 mb-1" for="register_email">Email</label>
+          <input class="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" id="register_email" name="email" type="email" required />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-700 dark:text-slate-300 mb-1" for="register_password">Password</label>
+          <input class="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" id="register_password" name="password" type="password" minlength="8" required />
+        </div>
+        <button class="w-full rounded-md border border-slate-300 py-2 text-slate-900 hover:bg-slate-100 transition dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800" type="submit">
+          Request access
+        </button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}
