@@ -107,6 +107,43 @@ def test_non_admin_dashboard_shows_team_workload():
         db.close()
 
 
+def test_dashboard_renders_unassigned_overdue_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"dashboard-overdue-{token}@example.com",
+            full_name="Dashboard Overdue",
+            capacity=8,
+        )
+        overdue_day = date.fromordinal(date.today().toordinal() - 1)
+        TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Overdue Unassigned {token}",
+                description="Regression coverage",
+                due_date=overdue_day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert f"Overdue Unassigned {token}" in response.text
+    finally:
+        db.close()
+
+
 def test_non_admin_day_view_can_toggle_between_team_and_mine():
     db = SessionLocal()
     try:
@@ -797,5 +834,37 @@ def test_unrelated_user_can_open_task_but_cannot_quick_update_status():
             follow_redirects=False,
         )
         assert status_response.status_code == 403
+    finally:
+        db.close()
+
+
+def test_task_edit_invalid_submission_returns_form_error():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-error-{token}@example.com",
+            full_name="Edit Error User",
+            capacity=10,
+        )
+        day = date.today() + timedelta(days=2)
+        task = _create_task(db, creator=viewer, assignee=viewer, title=f"Editable Task {token}", day=day)
+
+        client = _authed_client(viewer)
+        response = client.post(
+            f"/tasks/{task.id}/edit",
+            data={
+                "title": task.title,
+                "description": task.description,
+                "due_date": "not-a-date",
+                "effort_level": task.effort_level.value,
+                "status_value": task.status.value,
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Please provide valid task values before saving." in response.text
     finally:
         db.close()

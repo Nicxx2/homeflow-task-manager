@@ -359,6 +359,7 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
             "unassigned_tasks": unassigned_tasks,
             "all_tasks": all_tasks,
             "today_workload": today_workload,
+            "today": today,
             "ai_ui_status": ai_ui_status,
         },
     )
@@ -693,6 +694,7 @@ def task_edit_page(task_id: int, request: Request, user: User = Depends(get_curr
 @router.post("/tasks/{task_id}/edit", response_class=HTMLResponse)
 def task_edit_submit(
     task_id: int,
+    request: Request,
     title: str = Form(...),
     description: str = Form(...),
     due_date: str = Form(...),
