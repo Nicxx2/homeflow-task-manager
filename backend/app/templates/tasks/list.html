@@ -1,64 +1,171 @@
 {% extends "base.html" %}
 {% block content %}
-<header class="flex items-center justify-between mb-6">
+<header class="density-header mb-6 flex items-center justify-between">
   <div>
     <h1 class="text-2xl font-semibold">Tasks</h1>
-    <p class="text-slate-500 dark:text-slate-400">Browse and open tasks to edit details or assign work.</p>
+    <p class="text-slate-500 dark:text-slate-400">Focus on what needs action first. Older completed work stays out of the way until you expand it.</p>
   </div>
-  <a href="/tasks/new" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">New Task</a>
+  <a href="/tasks/new" class="app-primary-button rounded-md px-4 py-2">New Task</a>
 </header>
 
-<section class="bg-white rounded-xl border border-slate-200 overflow-hidden dark:bg-slate-900 dark:border-slate-800">
-  <table class="w-full text-sm">
-    <thead class="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-      <tr>
-        <th class="text-left px-4 py-3">Title</th>
-        <th class="text-left px-4 py-3">Due</th>
-        <th class="text-left px-4 py-3">Effort</th>
-        <th class="text-left px-4 py-3">Points</th>
-        <th class="text-left px-4 py-3">Status</th>
-        <th class="text-left px-4 py-3">Assignment</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for task in tasks %}
-      <tr class="border-t border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
-        <td class="px-4 py-3"><a class="text-indigo-600 hover:underline dark:text-indigo-300 dark:hover:text-indigo-200" href="/tasks/{{ task.id }}">{{ task.title }}</a></td>
-        <td class="px-4 py-3">{{ task.due_date }}</td>
-        <td class="px-4 py-3 uppercase">{{ task.effort_level.value }}</td>
-        <td class="px-4 py-3">{{ task.points_value }}</td>
-        <td class="px-4 py-3">
-          {% if user.is_admin or task.assignee_id == user.id %}
-          <form method="post" action="/tasks/{{ task.id }}/status">
-            <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
-            <select
-              name="status_value"
-              onchange="this.form.submit()"
-              class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
-            >
-              {% for item in statuses %}
-              <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
-              {% endfor %}
-            </select>
-          </form>
-          {% else %}
-          <span class="text-slate-700 dark:text-slate-300">{{ task.status.value }}</span>
-          {% endif %}
-        </td>
-        <td class="px-4 py-3">
-          {% if task.assignee_id %}
-            {{ task.assignment_date or "-" }}
-          {% else %}
-            <span class="text-slate-500 dark:text-slate-400">Unassigned</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% else %}
-      <tr>
-        <td class="px-4 py-5 text-slate-500 dark:text-slate-400" colspan="6">No tasks yet. Create a task to get started.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<section class="density-stack mb-5 grid gap-3 sm:grid-cols-4">
+  <div class="app-surface density-panel rounded-xl border p-4">
+    <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Overdue</p>
+    <p class="mt-1 text-2xl font-semibold">{{ overdue_tasks|length }}</p>
+  </div>
+  <div class="app-surface density-panel rounded-xl border p-4">
+    <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Up next</p>
+    <p class="mt-1 text-2xl font-semibold">{{ up_next_tasks|length }}</p>
+  </div>
+  <div class="app-surface density-panel rounded-xl border p-4">
+    <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Unassigned</p>
+    <p class="mt-1 text-2xl font-semibold">{{ unassigned_tasks|length }}</p>
+  </div>
+  <div class="app-surface density-panel rounded-xl border p-4">
+    <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">In progress</p>
+    <p class="mt-1 text-2xl font-semibold">{{ in_progress_tasks|length }}</p>
+  </div>
 </section>
+
+{% macro task_card(task, statuses, user, current_page_url) %}
+{% set card_state_class = "app-surface" %}
+{% if task.status.value == "completed" and task.recurrence_parent_id %}
+  {% set card_state_class = "app-surface" %}
+{% elif task.due_date < today and task.status.value != "completed" %}
+  {% set card_state_class = "app-status-overdue" %}
+{% elif task.status.value == "in_progress" %}
+  {% set card_state_class = "app-status-progress" %}
+{% elif task.assignee_id is none %}
+  {% set card_state_class = "app-status-unassigned" %}
+{% endif %}
+<article
+  class="{{ card_state_class }} {% if task.personal_highlight_color %}app-task-highlight{% endif %} density-panel rounded-xl border p-4"
+  {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}
+>
+  <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div>
+      <div class="flex items-center gap-2">
+        <a class="app-link app-task-title text-base font-medium hover:underline" href="/tasks/{{ task.id }}">{{ task.title }}</a>
+        {% if task.recurrence_pattern == "weekly" %}
+        <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">Recurring</span>
+        {% endif %}
+        {% if task.personal_highlight_color %}
+        <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-700 dark:text-slate-200" style="border-color: {{ task.personal_highlight_color }}; color: {{ task.personal_highlight_color }};">My highlight</span>
+        {% endif %}
+      </div>
+      <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        Due {{ task.due_date }} | {{ task.effort_level.value|upper }} | {{ task.points_value }} pts
+      </p>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        {% if task.assignee_id %}
+          Assigned for {{ task.assignment_date or "-" }}
+        {% else %}
+          Unassigned
+        {% endif %}
+        {% if task.recurrence_pattern == "weekly" %} | repeats weekly{% elif task.recurrence_parent_id %} | completed recurring occurrence{% endif %}
+      </p>
+    </div>
+    <div class="flex items-center gap-3">
+      {% if user.is_admin or task.assignee_id == user.id %}
+      <form method="post" action="/tasks/{{ task.id }}/status">
+        <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+        <select
+          name="status_value"
+          onchange="this.form.submit()"
+          class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+        >
+          {% for item in statuses %}
+          <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% else %}
+      <span class="text-xs text-slate-600 dark:text-slate-300">{{ task.status.value }}</span>
+      {% endif %}
+    </div>
+  </div>
+</article>
+{% endmacro %}
+
+<div class="density-stack space-y-5">
+  <section class="density-stack space-y-3">
+    <div>
+      <h2 class="font-medium">Overdue</h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400">Past-due work stays at the top until it is completed.</p>
+    </div>
+    {% for task in overdue_tasks %}
+      {{ task_card(task, statuses, user, current_page_url) }}
+    {% else %}
+    <div class="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+      No overdue tasks right now.
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="density-stack space-y-3">
+    <div>
+      <h2 class="font-medium">Up Next</h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400">Assigned tasks that are still pending and coming up next.</p>
+    </div>
+    {% for task in up_next_tasks %}
+      {{ task_card(task, statuses, user, current_page_url) }}
+    {% else %}
+    <div class="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+      No assigned pending tasks are waiting next.
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="density-stack space-y-3">
+    <div>
+      <h2 class="font-medium">Unassigned</h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400">Visible tasks that still need someone and a day.</p>
+    </div>
+    {% for task in unassigned_tasks %}
+      {{ task_card(task, statuses, user, current_page_url) }}
+    {% else %}
+    <div class="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+      No unassigned active tasks right now.
+    </div>
+    {% endfor %}
+  </section>
+
+  <details class="app-surface density-panel rounded-xl border p-5">
+    <summary class="cursor-pointer list-none">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-medium">In Progress</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Expand to review work already underway.</p>
+        </div>
+        <span class="text-sm text-slate-500 dark:text-slate-400">{{ in_progress_tasks|length }}</span>
+      </div>
+    </summary>
+    <div class="mt-4 space-y-3">
+      {% for task in in_progress_tasks %}
+        {{ task_card(task, statuses, user, current_page_url) }}
+      {% else %}
+      <p class="text-sm text-slate-500 dark:text-slate-400">Nothing is currently in progress.</p>
+      {% endfor %}
+    </div>
+  </details>
+
+  <details class="app-surface density-panel rounded-xl border p-5">
+    <summary class="cursor-pointer list-none">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-medium">Completed</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Expand only when you want to look back at finished work.</p>
+        </div>
+        <span class="text-sm text-slate-500 dark:text-slate-400">{{ completed_tasks|length }}</span>
+      </div>
+    </summary>
+    <div class="mt-4 space-y-3">
+      {% for task in completed_tasks %}
+        {{ task_card(task, statuses, user, current_page_url) }}
+      {% else %}
+      <p class="text-sm text-slate-500 dark:text-slate-400">No completed tasks yet.</p>
+      {% endfor %}
+    </div>
+  </details>
+</div>
 {% endblock %}

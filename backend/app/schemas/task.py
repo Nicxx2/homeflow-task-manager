@@ -16,6 +16,18 @@ class TaskCreate(BaseModel):
     fallback_used: bool = False
     provider_used: str | None = None
     model_used: str | None = None
+    recurrence_pattern: str | None = None
+    recurrence_interval_weeks: int | None = None
+    recurrence_until: date | None = None
+    recurrence_count_limit: int | None = None
+    recurrence_blocked_behavior: str | None = None
+
+    @field_validator("recurrence_interval_weeks", "recurrence_count_limit")
+    @classmethod
+    def recurrence_values_must_be_positive(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("Recurring task values must be positive.")
+        return value
 
 
 class TaskUpdate(BaseModel):
@@ -24,6 +36,18 @@ class TaskUpdate(BaseModel):
     due_date: date
     effort_level: EffortLevel
     status: TaskStatus = TaskStatus.PENDING
+    recurrence_pattern: str | None = None
+    recurrence_interval_weeks: int | None = None
+    recurrence_until: date | None = None
+    recurrence_count_limit: int | None = None
+    recurrence_blocked_behavior: str | None = None
+
+    @field_validator("recurrence_interval_weeks", "recurrence_count_limit")
+    @classmethod
+    def recurrence_values_must_be_positive(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("Recurring task values must be positive.")
+        return value
 
 
 class TaskAssignRequest(BaseModel):
@@ -55,5 +79,12 @@ class TaskRead(BaseModel):
     ai_provider_used: str | None = None
     ai_model_used: str | None = None
     fallback_used: bool
+    recurrence_pattern: str | None = None
+    recurrence_interval_weeks: int | None = None
+    recurrence_until: date | None = None
+    recurrence_count_limit: int | None = None
+    recurrence_blocked_behavior: str | None = None
+    recurrence_parent_id: int | None = None
+    recurrence_anchor_date: date | None = None
 
     model_config = {"from_attributes": True}

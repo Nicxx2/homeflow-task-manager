@@ -65,7 +65,7 @@
         <input type="number" min="1" name="session_timeout_minutes" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
       </label>
       <div class="md:col-span-2">
-        <button class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700" type="submit">Create approved user</button>
+      <button class="app-primary-button rounded-md px-4 py-2" type="submit">Create approved user</button>
       </div>
     </form>
 
@@ -127,7 +127,7 @@
       <label class="block text-sm">Low points <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="low_points" value="{{ low.points_value if low else 2 }}" /></label>
       <label class="block text-sm">Medium points <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="medium_points" value="{{ medium.points_value if medium else 5 }}" /></label>
       <label class="block text-sm">High points <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="high_points" value="{{ high.points_value if high else 8 }}" /></label>
-      <button class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700" type="submit">Save effort values</button>
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save effort values</button>
     </form>
   </section>
 
@@ -143,7 +143,7 @@
       {% else %}
       <p class="text-sm text-slate-500 dark:text-slate-400">No users found.</p>
       {% endfor %}
-      <button class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700" type="submit">Save capacities</button>
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save capacities</button>
     </form>
   </section>
 </div>
@@ -183,7 +183,7 @@
       <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Choose a model from the registry table below when possible.</span>
     </label>
     <div class="md:col-span-2 flex items-center gap-2">
-      <button class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700" type="submit">Save AI settings</button>
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save AI settings</button>
     </div>
   </form>
 

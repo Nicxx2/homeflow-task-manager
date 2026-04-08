@@ -12,6 +12,7 @@ from backend.app.ai.schemas.classification import TaskClassificationResult
 from backend.app.api.deps import get_current_user
 from backend.app.db.session import get_db
 from backend.app.models.enums import EffortLevel, TaskStatus
+from backend.app.models.task import Task
 from backend.app.models.user import User
 from backend.app.schemas.auth import RegisterRequest
 from backend.app.schemas.task import TaskAssignRequest, TaskCreate, TaskUpdate
@@ -19,11 +20,18 @@ from backend.app.services.admin_settings_service import AdminSettingsService
 from backend.app.services.ai_service import AIService
 from backend.app.services.app_assistant_service import AppAssistantService
 from backend.app.services.auth_service import AuthService
+from backend.app.services.recurring_task_service import RecurringTaskService
+from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
+from backend.app.services.user_task_display_service import UserTaskDisplayService
 from backend.app.services.workload_service import WorkloadService
 
 router = APIRouter()
 templates = Jinja2Templates(directory="backend/app/templates")
+
+
+def _is_history_occurrence(task) -> bool:
+    return task.recurrence_parent_id is not None and task.status == TaskStatus.COMPLETED
 
 
 def _can_access_task_detail(*, viewer: User, task) -> bool:
@@ -35,7 +43,11 @@ def _can_manage_task(*, viewer: User, task) -> bool:
 
 
 def _can_update_task_status(*, viewer: User, task) -> bool:
-    return viewer.is_admin or task.assignee_id == viewer.id
+    return not _is_history_occurrence(task) and (viewer.is_admin or task.assignee_id == viewer.id)
+
+
+def _can_override_schedule_for_assignment(*, viewer: User, assignee_id: int | None) -> bool:
+    return viewer.is_admin or (assignee_id is not None and viewer.id == assignee_id)
 
 
 def _member_users(db: Session) -> list[User]:
@@ -128,6 +140,85 @@ def _admin_settings_context(
     }
 
 
+def _schedule_page_context(*, request: Request, user: User, db: Session, form_error: str | None = None) -> dict:
+    scheduling = SchedulingService(db)
+    return {
+        "request": request,
+        "user": user,
+        "form_error": form_error,
+        **scheduling.get_schedule_page_context(user_id=user.id),
+    }
+
+
+def _appearance_page_context(*, request: Request, user: User, form_error: str | None = None) -> dict:
+    return {
+        "request": request,
+        "user": user,
+        "form_error": form_error,
+        "surface_style_options": [
+            {"value": "clean", "label": "Clean"},
+            {"value": "soft", "label": "Soft"},
+            {"value": "contrast", "label": "High contrast"},
+        ],
+        "density_options": [
+            {"value": "comfortable", "label": "Comfortable"},
+            {"value": "compact", "label": "Compact"},
+        ],
+        "decoration_options": [
+            {"value": "none", "label": "None"},
+            {"value": "glow", "label": "Soft glow"},
+            {"value": "petals", "label": "Soft petals"},
+        ],
+    }
+
+
+def _initial_assignment_date_for_task(task) -> str:
+    candidate = task.assignment_date or task.due_date
+    return max(candidate, date.today()).isoformat()
+
+
+def _apply_personal_task_highlights(*, db: Session, user: User, tasks: list[Task]) -> None:
+    UserTaskDisplayService(db).apply_highlights(user_id=user.id, tasks=tasks)
+
+
+def _parse_recurrence_form(
+    *,
+    repeat_weekly: str,
+    recurrence_interval_weeks: str,
+    recurrence_until: str,
+    recurrence_count_limit: str,
+    recurrence_blocked_behavior: str,
+) -> dict:
+    enabled = repeat_weekly.lower() in {"true", "on", "1", "yes"}
+    if not enabled:
+        return {
+            "recurrence_pattern": None,
+            "recurrence_interval_weeks": None,
+            "recurrence_until": None,
+            "recurrence_count_limit": None,
+            "recurrence_blocked_behavior": None,
+        }
+
+    interval_value = int(recurrence_interval_weeks) if recurrence_interval_weeks.strip() else 1
+    count_limit_value = int(recurrence_count_limit) if recurrence_count_limit.strip() else None
+    until_value = date.fromisoformat(recurrence_until) if recurrence_until.strip() else None
+    blocked_behavior = recurrence_blocked_behavior.strip() or "skip"
+    if blocked_behavior not in {"skip", "move_same_week"}:
+        raise ValueError("Invalid recurring blocked-date behavior.")
+
+    return {
+        "recurrence_pattern": "weekly",
+        "recurrence_interval_weeks": interval_value,
+        "recurrence_until": until_value,
+        "recurrence_count_limit": count_limit_value,
+        "recurrence_blocked_behavior": blocked_behavior,
+    }
+
+
+def _sync_recurring_tasks(db: Session) -> None:
+    RecurringTaskService(db).sync()
+
+
 @router.get("/", response_class=HTMLResponse)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
@@ -209,6 +300,7 @@ def register_submit(
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _sync_recurring_tasks(db)
     service = TaskService(db)
     workload = WorkloadService(db)
     admin_service = AdminSettingsService(db)
@@ -216,20 +308,49 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
     users_for_today = _member_users(db)
     all_tasks = service.get_tasks()
     unassigned_tasks = service.get_tasks(only_unassigned=True)
+    _apply_personal_task_highlights(db=db, user=user, tasks=all_tasks)
+    _apply_personal_task_highlights(db=db, user=user, tasks=unassigned_tasks)
 
     today = date.today()
     today_workload = []
     for item in users_for_today:
         points = workload.get_daily_points(user_id=item.id, date_value=today)
         capacity = workload.get_user_capacity(item.id)
+        remaining_capacity = None if capacity is None else capacity - points
+        schedule_block = workload.scheduling.get_block_for_date(user_id=item.id, date_value=today)
+        tasks_today = workload.get_tasks_for_user_on_date(user_id=item.id, date_value=today)
+        _apply_personal_task_highlights(db=db, user=user, tasks=tasks_today)
+        status_label = "Capacity unset"
+        status_tone = "slate"
+        if schedule_block and schedule_block.get("type") == "away":
+            status_label = "Away"
+            status_tone = "amber"
+        elif remaining_capacity is None:
+            status_label = "Capacity unset"
+            status_tone = "slate"
+        elif remaining_capacity < 0:
+            status_label = "Over"
+            status_tone = "red"
+        elif remaining_capacity <= 2:
+            status_label = "Nearly full"
+            status_tone = "amber"
+        else:
+            status_label = "Free"
+            status_tone = "emerald"
         today_workload.append(
             {
                 "user": item,
                 "points": points,
                 "capacity": capacity,
-                "remaining_capacity": None if capacity is None else capacity - points,
+                "remaining_capacity": remaining_capacity,
+                "tasks_today": tasks_today,
+                "status_label": status_label,
+                "status_tone": status_tone,
+                "schedule_block": schedule_block,
             }
         )
+    status_rank = {"Over": 0, "Nearly full": 1, "Free": 2, "Capacity unset": 3, "Away": 4}
+    today_workload.sort(key=lambda row: (status_rank.get(row["status_label"], 5), row["user"].full_name.lower()))
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -245,16 +366,49 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
 
 @router.get("/tasks", response_class=HTMLResponse)
 def tasks_page(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _sync_recurring_tasks(db)
     service = TaskService(db)
     tasks = service.get_tasks()
+    completed_history = list(
+        db.query(Task)
+        .filter(Task.recurrence_parent_id.is_not(None), Task.status == TaskStatus.COMPLETED)
+        .order_by(Task.due_date.desc(), Task.created_at.desc())
+        .all()
+    )
+    _apply_personal_task_highlights(db=db, user=user, tasks=tasks)
+    _apply_personal_task_highlights(db=db, user=user, tasks=completed_history)
+    today = date.today()
+    overdue_tasks = [task for task in tasks if task.status != TaskStatus.COMPLETED and task.due_date < today]
+    up_next_tasks = [
+        task
+        for task in tasks
+        if task.status == TaskStatus.PENDING and task.assignee_id is not None and task.due_date >= today
+    ]
+    unassigned_tasks = [
+        task
+        for task in tasks
+        if task.status != TaskStatus.COMPLETED and task.assignee_id is None and task.due_date >= today
+    ]
+    in_progress_tasks = [task for task in tasks if task.status == TaskStatus.IN_PROGRESS and task.due_date >= today]
+    completed_tasks = sorted(
+        [task for task in tasks if task.status == TaskStatus.COMPLETED] + completed_history,
+        key=lambda task: (task.due_date, task.created_at),
+        reverse=True,
+    )
     return templates.TemplateResponse(
         "tasks/list.html",
         {
             "request": request,
             "user": user,
             "tasks": tasks,
+            "overdue_tasks": overdue_tasks,
+            "up_next_tasks": up_next_tasks,
+            "unassigned_tasks": unassigned_tasks,
+            "in_progress_tasks": in_progress_tasks,
+            "completed_tasks": completed_tasks,
             "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
             "current_page_url": _current_path_with_query(request, "/tasks"),
+            "today": today,
         },
     )
 
@@ -273,6 +427,7 @@ def task_create_page(request: Request, user: User = Depends(get_current_user), d
             "today": date.today().isoformat(),
             "ai_settings": ai_settings,
             "ai_ui_status": ai_ui_status,
+            "personal_highlight_default": user.accent_color,
         },
     )
 
@@ -313,10 +468,37 @@ def task_create_submit(
     fallback_used: str = Form("false"),
     provider_used: str = Form(""),
     model_used: str = Form(""),
+    repeat_weekly: str = Form("false"),
+    recurrence_interval_weeks: str = Form("1"),
+    recurrence_until: str = Form(""),
+    recurrence_count_limit: str = Form(""),
+    recurrence_blocked_behavior: str = Form("skip"),
+    use_personal_highlight: str = Form("false"),
+    personal_highlight_color: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     ai_settings = AdminSettingsService(db).get_ai_settings()
+    highlight_enabled = use_personal_highlight.lower() in {"true", "on", "1", "yes"}
+    normalized_highlight_color = None
+    if highlight_enabled:
+        try:
+            normalized_highlight_color = AuthService._normalize_hex_color(personal_highlight_color or user.accent_color)
+        except ValueError:
+            return templates.TemplateResponse(
+                "tasks/create.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
+                    "today": date.today().isoformat(),
+                    "ai_settings": ai_settings,
+                    "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
+                    "personal_highlight_default": user.accent_color,
+                    "form_error": "Please choose a valid personal task highlight color.",
+                },
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     try:
         level = EffortLevel(effort_level)
     except ValueError:
@@ -329,6 +511,7 @@ def task_create_submit(
                 "today": date.today().isoformat(),
                 "ai_settings": ai_settings,
                 "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
+                "personal_highlight_default": user.accent_color,
                 "form_error": "Please select a valid effort level before saving.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -377,7 +560,32 @@ def task_create_submit(
                 "today": date.today().isoformat(),
                 "ai_settings": ai_settings,
                 "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
+                "personal_highlight_default": user.accent_color,
                 "form_error": "Please choose a valid due date.",
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        recurrence_values = _parse_recurrence_form(
+            repeat_weekly=repeat_weekly,
+            recurrence_interval_weeks=recurrence_interval_weeks,
+            recurrence_until=recurrence_until,
+            recurrence_count_limit=recurrence_count_limit,
+            recurrence_blocked_behavior=recurrence_blocked_behavior,
+        )
+    except ValueError:
+        return templates.TemplateResponse(
+            "tasks/create.html",
+            {
+                "request": request,
+                "user": user,
+                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
+                "today": date.today().isoformat(),
+                "ai_settings": ai_settings,
+                "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
+                "personal_highlight_default": user.accent_color,
+                "form_error": "Please provide valid recurring task settings.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -394,6 +602,7 @@ def task_create_submit(
             fallback_used=fallback_used.lower() == "true",
             provider_used=provider_used or None,
             model_used=model_used or None,
+            **recurrence_values,
         )
     except ValidationError:
         return templates.TemplateResponse(
@@ -405,35 +614,54 @@ def task_create_submit(
                 "today": date.today().isoformat(),
                 "ai_settings": ai_settings,
                 "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
+                "personal_highlight_default": user.accent_color,
                 "form_error": "Please provide title, description, due date, and a valid effort level.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-    TaskService(db).create_unassigned_task(payload, user)
+    task = TaskService(db).create_unassigned_task(payload, user)
+    if highlight_enabled:
+        UserTaskDisplayService(db).set_highlight_color(
+            user=user,
+            task=task,
+            highlight_color=normalized_highlight_color,
+        )
     return RedirectResponse(url="/tasks", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 def task_detail_page(task_id: int, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _sync_recurring_tasks(db)
     service = TaskService(db)
     task = service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
     if not _can_access_task_detail(viewer=user, task=task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+    _apply_personal_task_highlights(db=db, user=user, tasks=[task])
+    is_history_occurrence = _is_history_occurrence(task)
     all_users = _assignable_users_for_task(db, task)
+    recurrence_history = []
+    if task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None:
+        recurrence_history = RecurringTaskService(db).get_history(task.id)
     return templates.TemplateResponse(
         "tasks/detail.html",
         {
             "request": request,
             "user": user,
+            "today_iso": date.today().isoformat(),
+            "initial_assignment_date": _initial_assignment_date_for_task(task),
             "task": task,
+            "recurrence_history": recurrence_history,
             "all_users": all_users,
             "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
             "assignment_feedback": None,
             "current_page_url": _current_path_with_query(request, f"/tasks/{task.id}"),
-            "can_manage_task": _can_manage_task(viewer=user, task=task),
+            "can_manage_task": _can_manage_task(viewer=user, task=task) and not is_history_occurrence,
             "can_update_status": _can_update_task_status(viewer=user, task=task),
+            "is_history_occurrence": is_history_occurrence,
+            "personal_highlight_color": getattr(task, "personal_highlight_color", None),
+            "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
         },
     )
 
@@ -444,8 +672,9 @@ def task_edit_page(task_id: int, request: Request, user: User = Depends(get_curr
     task = service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    if not _can_manage_task(viewer=user, task=task):
+    if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+    _apply_personal_task_highlights(db=db, user=user, tasks=[task])
     return templates.TemplateResponse(
         "tasks/edit.html",
         {
@@ -455,6 +684,8 @@ def task_edit_page(task_id: int, request: Request, user: User = Depends(get_curr
             "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
             "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
             "form_error": None,
+            "personal_highlight_color": getattr(task, "personal_highlight_color", None),
+            "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
         },
     )
 
@@ -467,6 +698,13 @@ def task_edit_submit(
     due_date: str = Form(...),
     effort_level: str = Form(...),
     status_value: str = Form("pending"),
+    repeat_weekly: str = Form("false"),
+    recurrence_interval_weeks: str = Form("1"),
+    recurrence_until: str = Form(""),
+    recurrence_count_limit: str = Form(""),
+    recurrence_blocked_behavior: str = Form("skip"),
+    use_personal_highlight: str = Form("false"),
+    personal_highlight_color: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -474,8 +712,29 @@ def task_edit_submit(
     task = service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    if not _can_manage_task(viewer=user, task=task):
+    if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+    highlight_enabled = use_personal_highlight.lower() in {"true", "on", "1", "yes"}
+    normalized_highlight_color = None
+    if highlight_enabled:
+        try:
+            normalized_highlight_color = AuthService._normalize_hex_color(personal_highlight_color or user.accent_color)
+        except ValueError:
+            _apply_personal_task_highlights(db=db, user=user, tasks=[task])
+            return templates.TemplateResponse(
+                "tasks/edit.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "task": task,
+                    "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
+                    "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
+                    "form_error": "Please choose a valid personal task highlight color.",
+                    "personal_highlight_color": getattr(task, "personal_highlight_color", None),
+                    "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
+                },
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
 
     try:
         update_level = EffortLevel(effort_level)
@@ -491,6 +750,34 @@ def task_edit_submit(
                 "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
                 "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
                 "form_error": "Please provide valid task values before saving.",
+                "personal_highlight_color": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id),
+                "personal_highlight_default": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id)
+                or user.accent_color,
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        recurrence_values = _parse_recurrence_form(
+            repeat_weekly=repeat_weekly,
+            recurrence_interval_weeks=recurrence_interval_weeks,
+            recurrence_until=recurrence_until,
+            recurrence_count_limit=recurrence_count_limit,
+            recurrence_blocked_behavior=recurrence_blocked_behavior,
+        )
+    except ValueError:
+        return templates.TemplateResponse(
+            "tasks/edit.html",
+            {
+                "request": request,
+                "user": user,
+                "task": task,
+                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
+                "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
+                "form_error": "Please provide valid recurring task settings before saving.",
+                "personal_highlight_color": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id),
+                "personal_highlight_default": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id)
+                or user.accent_color,
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -501,8 +788,40 @@ def task_edit_submit(
         due_date=update_due_date,
         effort_level=update_level,
         status=update_status,
+        **recurrence_values,
     )
     service.update_task(task, payload)
+    UserTaskDisplayService(db).set_highlight_color(
+        user=user,
+        task=task,
+        highlight_color=normalized_highlight_color if highlight_enabled else None,
+    )
+    return RedirectResponse(url=f"/tasks/{task_id}", status_code=status.HTTP_302_FOUND)
+
+
+@router.post("/tasks/{task_id}/display")
+def task_display_submit(
+    task_id: int,
+    use_personal_highlight: str = Form("false"),
+    personal_highlight_color: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    task = TaskService(db).get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+    if not _can_access_task_detail(viewer=user, task=task):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+
+    highlight_enabled = use_personal_highlight.lower() in {"true", "on", "1", "yes"}
+    try:
+        UserTaskDisplayService(db).set_highlight_color(
+            user=user,
+            task=task,
+            highlight_color=(personal_highlight_color or user.accent_color) if highlight_enabled else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return RedirectResponse(url=f"/tasks/{task_id}", status_code=status.HTTP_302_FOUND)
 
 
@@ -512,6 +831,7 @@ def task_assign_submit(
     request: Request,
     assignee_id: int = Form(...),
     assignment_date: str = Form(...),
+    allow_policy_override: str = Form("false"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -531,9 +851,11 @@ def task_assign_submit(
         task,
         assignee_id=payload.assignee_id,
         assignment_date=payload.assignment_date,
+        allow_policy_override=_can_override_schedule_for_assignment(viewer=user, assignee_id=payload.assignee_id)
+        and allow_policy_override.lower() in {"true", "on", "1", "yes"},
     )
     if success:
-        return RedirectResponse(url=f"/tasks/{task_id}", status_code=status.HTTP_302_FOUND)
+        return RedirectResponse(url="/tasks", status_code=status.HTTP_302_FOUND)
 
     all_users = _assignable_users_for_task(db, task)
     return templates.TemplateResponse(
@@ -541,6 +863,8 @@ def task_assign_submit(
         {
             "request": request,
             "user": user,
+            "today_iso": date.today().isoformat(),
+            "initial_assignment_date": _initial_assignment_date_for_task(task),
             "task": task,
             "all_users": all_users,
             "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
@@ -548,6 +872,8 @@ def task_assign_submit(
                 **validation,
                 "selected_assignee_id": payload.assignee_id,
                 "selected_assignment_date": payload.assignment_date.isoformat(),
+                "allow_policy_override": _can_override_schedule_for_assignment(viewer=user, assignee_id=payload.assignee_id)
+                and allow_policy_override.lower() in {"true", "on", "1", "yes"},
             },
             "current_page_url": f"/tasks/{task.id}",
             "can_manage_task": _can_manage_task(viewer=user, task=task),
@@ -604,6 +930,7 @@ def task_assignment_check(
     request: Request,
     assignee_id: int | None = None,
     assignment_date: str | None = None,
+    allow_policy_override: str = "false",
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -637,11 +964,133 @@ def task_assignment_check(
         date_value=parsed_date,
         task_points=task.points_value,
         exclude_task_id=task.id,
+        allow_policy_override=_can_override_schedule_for_assignment(viewer=user, assignee_id=assignee_id)
+        and allow_policy_override.lower() in {"true", "on", "1", "yes"},
     )
     return templates.TemplateResponse(
         "tasks/partials/assignment_feedback.html",
         {"request": request, "feedback": feedback, "task": task},
     )
+
+
+@router.get("/schedule", response_class=HTMLResponse)
+def schedule_page(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return templates.TemplateResponse("schedule.html", _schedule_page_context(request=request, user=user, db=db))
+
+
+@router.get("/appearance", response_class=HTMLResponse)
+def appearance_page(request: Request, user: User = Depends(get_current_user)):
+    return templates.TemplateResponse("appearance.html", _appearance_page_context(request=request, user=user))
+
+
+@router.post("/appearance", response_class=HTMLResponse)
+def appearance_submit(
+    request: Request,
+    theme_preference: str = Form(...),
+    accent_color: str = Form(...),
+    overdue_color: str = Form(...),
+    recurring_color: str = Form(...),
+    in_progress_color: str = Form(...),
+    unassigned_color: str = Form(...),
+    surface_style: str = Form(...),
+    density_preference: str = Form(...),
+    decoration_style: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    service = AuthService(db)
+    try:
+        service.update_appearance_preferences(
+            user,
+            theme_preference=theme_preference,
+            accent_color=accent_color,
+            overdue_color=overdue_color,
+            recurring_color=recurring_color,
+            in_progress_color=in_progress_color,
+            unassigned_color=unassigned_color,
+            surface_style=surface_style,
+            density_preference=density_preference,
+            decoration_style=decoration_style,
+        )
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "appearance.html",
+            _appearance_page_context(request=request, user=user, form_error=str(exc)),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return RedirectResponse(url="/appearance", status_code=status.HTTP_302_FOUND)
+
+
+@router.post("/schedule/preferences", response_class=HTMLResponse)
+async def schedule_preferences_submit(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    form = await request.form()
+    allowed_days = {
+        key: form.get(f"allow_{key}") in {"true", "on", "1", "yes"}
+        for key in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    }
+    if not any(allowed_days.values()):
+        return templates.TemplateResponse(
+            "schedule.html",
+            _schedule_page_context(
+                request=request,
+                user=user,
+                db=db,
+                form_error="At least one day must stay available for scheduling.",
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    SchedulingService(db).update_preferences(user_id=user.id, allowed_days=allowed_days)
+    return RedirectResponse(url="/schedule", status_code=status.HTTP_302_FOUND)
+
+
+@router.post("/schedule/away", response_class=HTMLResponse)
+def schedule_away_submit(
+    request: Request,
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    try:
+        parsed_start = date.fromisoformat(start_date)
+        parsed_end = date.fromisoformat(end_date)
+    except ValueError:
+        return templates.TemplateResponse(
+            "schedule.html",
+            _schedule_page_context(request=request, user=user, db=db, form_error="Please choose valid away dates."),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if parsed_end < parsed_start:
+        return templates.TemplateResponse(
+            "schedule.html",
+            _schedule_page_context(
+                request=request,
+                user=user,
+                db=db,
+                form_error="Away end date must be on or after the start date.",
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    SchedulingService(db).add_away_period(user_id=user.id, start_date=parsed_start, end_date=parsed_end, note=note)
+    return RedirectResponse(url="/schedule", status_code=status.HTTP_302_FOUND)
+
+
+@router.post("/schedule/away/{period_id}/delete")
+def schedule_away_delete(
+    period_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    SchedulingService(db).remove_away_period(user_id=user.id, period_id=period_id)
+    return RedirectResponse(url="/schedule", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/day-view", response_class=HTMLResponse)
@@ -652,6 +1101,7 @@ def day_view(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _sync_recurring_tasks(db)
     if day:
         try:
             target_day = date.fromisoformat(day)
@@ -670,6 +1120,7 @@ def day_view(
         points = workload.get_daily_points(user_id=member.id, date_value=target_day)
         cap = workload.get_user_capacity(member.id)
         tasks = workload.get_tasks_for_user_on_date(user_id=member.id, date_value=target_day)
+        _apply_personal_task_highlights(db=db, user=user, tasks=tasks)
         rows.append(
             {
                 "member": member,

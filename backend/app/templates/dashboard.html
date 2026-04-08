@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<header class="flex items-start justify-between mb-6">
+<header class="density-header mb-6 flex items-start justify-between">
   <div>
     <h1 class="text-2xl font-semibold">Dashboard</h1>
     <p class="text-slate-500 dark:text-slate-400 mt-1">Welcome back, {{ user.full_name }}.</p>
@@ -16,108 +16,149 @@
   </div>
   <div class="flex items-center gap-2">
     <a href="/tasks" class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Tasks</a>
-    <a href="/tasks/new" class="rounded-md bg-indigo-600 text-white px-3 py-2 text-sm hover:bg-indigo-700">Create Task</a>
+    <a href="/tasks/new" class="app-primary-button rounded-md px-3 py-2 text-sm">Create Task</a>
   </div>
 </header>
 
-<section class="grid sm:grid-cols-3 gap-3 mb-5">
-  <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+<section class="density-stack mb-5 grid gap-3 sm:grid-cols-3">
+  <div class="app-surface density-panel rounded-xl border p-4">
     <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Unassigned</p>
     <p class="mt-1 text-2xl font-semibold">{{ unassigned_tasks|length }}</p>
     <p class="text-xs text-slate-500 dark:text-slate-400">Ready to assign</p>
   </div>
-  <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+  <div class="app-surface density-panel rounded-xl border p-4">
     <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Total tasks</p>
     <p class="mt-1 text-2xl font-semibold">{{ all_tasks|length }}</p>
     <p class="text-xs text-slate-500 dark:text-slate-400">Visible in your workspace</p>
   </div>
-  <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+  <div class="app-surface density-panel rounded-xl border p-4">
     <p class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Team members</p>
     <p class="mt-1 text-2xl font-semibold">{{ today_workload|length }}</p>
     <p class="text-xs text-slate-500 dark:text-slate-400">Shown in today's capacity view</p>
   </div>
 </section>
 
-<div class="grid md:grid-cols-2 gap-5">
-  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800">
-    <div class="mb-3">
-      <h2 class="font-medium">Unassigned Tasks</h2>
-      <p class="text-xs text-slate-500 dark:text-slate-400">Tasks created but not yet scheduled.</p>
-    </div>
-    <div class="space-y-2">
-      {% for task in unassigned_tasks %}
-      <a href="/tasks/{{ task.id }}" class="block border border-slate-200 rounded-md px-3 py-2 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800">
-        <p class="font-medium text-sm">{{ task.title }}</p>
-        <p class="text-xs text-slate-500 dark:text-slate-400">Due {{ task.due_date }} | {{ task.points_value }} pts</p>
-      </a>
-      {% else %}
-      <div class="rounded-md border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        No unassigned tasks right now. New tasks can be assigned later from the task detail page.
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800">
-    <div class="mb-3">
-      <h2 class="font-medium">Recent Task Activity</h2>
-      <p class="text-xs text-slate-500 dark:text-slate-400">Latest tasks and assignment state.</p>
-    </div>
-    <div class="space-y-2">
-      {% for task in all_tasks %}
-      <a href="/tasks/{{ task.id }}" class="block border border-slate-200 rounded-md px-3 py-2 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800">
-        <p class="font-medium text-sm">{{ task.title }}</p>
-        <p class="text-xs text-slate-500 dark:text-slate-400">
-          {{ task.status.value }} |
-          {% if not task.assignee_id %}
-            unassigned
-          {% else %}
-            assigned on {{ task.assignment_date }}
-          {% endif %}
-        </p>
-      </a>
-      {% else %}
-      <div class="rounded-md border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        No tasks yet. Create your first task to get started.
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="bg-white rounded-xl border border-slate-200 p-5 md:col-span-2 dark:bg-slate-900 dark:border-slate-800">
-    <div class="flex items-center justify-between mb-3">
+<div class="density-stack space-y-5">
+  <section class="app-surface density-panel rounded-xl border p-5">
+    <div class="flex items-center justify-between mb-4">
       <div>
         <h2 class="font-medium">Today's Workload</h2>
-        <p class="text-xs text-slate-500 dark:text-slate-400">Everyone's capacity is visible here. Used points include completed tasks assigned for today.</p>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Use this as the main scheduling view. It shows who is free, nearly full, over capacity, or away today.</p>
       </div>
-      <a href="/day-view?scope=team" class="text-sm text-indigo-600 hover:underline dark:text-indigo-400">Open day view</a>
+      <a href="/day-view?scope=team" class="app-link text-sm hover:underline">Open day view</a>
     </div>
-    <div class="grid md:grid-cols-2 gap-3">
+    <div class="density-stack grid gap-3 md:grid-cols-2">
       {% for item in today_workload %}
-      <div class="border border-slate-200 rounded-md px-3 py-3 dark:border-slate-700">
-        <div class="flex items-center justify-between">
-          <p class="text-sm font-medium">{{ item.user.full_name }}</p>
-          <span class="text-xs rounded-full px-2 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {{ item.points }} pts used
+      <div class="app-surface density-panel rounded-xl border px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="app-user-accent text-sm font-medium">{{ item.user.full_name }}</p>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {{ item.tasks_today|length }} task{{ "" if item.tasks_today|length == 1 else "s" }} today
+            </p>
+          </div>
+          <span class="text-xs rounded-full px-2 py-1 font-medium
+            {% if item.status_tone == 'red' %}bg-red-100 text-red-800 dark:bg-red-950/30 dark:text-red-200
+            {% elif item.status_tone == 'amber' %}bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200
+            {% elif item.status_tone == 'emerald' %}bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200
+            {% else %}bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300{% endif %}">
+            {{ item.status_label }}
           </span>
         </div>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Capacity: {{ item.capacity if item.capacity is not none else "not set" }} pts
-        </p>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          {% if item.remaining_capacity is none %}
-            Remaining: unavailable
-          {% elif item.remaining_capacity >= 0 %}
-            Remaining: {{ item.remaining_capacity }} pts left
-          {% else %}
-            Remaining: {{ item.remaining_capacity | abs }} pts over
+        <div class="mt-3">
+          <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+            <span>{{ item.points }} used</span>
+            <span>{{ item.capacity if item.capacity is not none else "not set" }} capacity</span>
+          </div>
+          <div class="app-progress-track mt-2 h-2 rounded-full">
+            {% set ratio = 0 if item.capacity in [none, 0] else ((item.points / item.capacity) * 100) %}
+            <div
+              class="app-progress-fill h-2 rounded-full
+                {% if item.status_tone == 'red' %}bg-red-500
+                {% elif item.status_tone == 'amber' %}bg-amber-500
+                {% elif item.status_tone == 'emerald' %}bg-emerald-500
+                {% else %}bg-slate-400{% endif %}"
+              style="width: {{ [ratio, 100]|min }}%;"
+            ></div>
+          </div>
+        </div>
+        <div class="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+          {% if item.schedule_block and item.status_label == "Away" %}
+          <p>{{ item.schedule_block.message }}</p>
           {% endif %}
-        </p>
+          {% if item.remaining_capacity is none %}
+          <p>Remaining: unavailable</p>
+          {% elif item.remaining_capacity >= 0 %}
+          <p>Remaining: {{ item.remaining_capacity }} pts left</p>
+          {% else %}
+          <p>Remaining: {{ item.remaining_capacity | abs }} pts over</p>
+          {% endif %}
+          {% if item.tasks_today %}
+          <p {% if item.tasks_today[0].personal_highlight_color %}class="app-user-accent" style="color: {{ item.tasks_today[0].personal_highlight_color }};"{% endif %}>Next task: {{ item.tasks_today[0].title }}</p>
+          {% endif %}
+        </div>
       </div>
       {% else %}
       <p class="text-sm text-slate-500">No workload data available for today.</p>
       {% endfor %}
     </div>
   </section>
+
+  <div class="grid items-start gap-5 md:grid-cols-2">
+    <details class="app-surface density-panel self-start rounded-xl border p-5">
+      <summary class="cursor-pointer list-none">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-medium">Unassigned Tasks</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Expand only when you want to review unscheduled work.</p>
+          </div>
+          <span class="text-sm text-slate-500 dark:text-slate-400">{{ unassigned_tasks|length }}</span>
+        </div>
+      </summary>
+      <div class="mt-4 space-y-2">
+        {% for task in unassigned_tasks %}
+        <a href="/tasks/{{ task.id }}" class="{% if task.due_date < today and task.status.value != 'completed' %}app-status-overdue{% else %}app-status-unassigned{% endif %} {% if task.personal_highlight_color %}app-task-highlight{% endif %} block rounded-md border px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800" {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}>
+          <p class="font-medium text-sm">{{ task.title }}</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Due {{ task.due_date }} | {{ task.points_value }} pts</p>
+        </a>
+        {% else %}
+        <div class="rounded-md border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          No unassigned tasks right now. New tasks can be assigned later from the task detail page.
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+
+    <details class="app-surface density-panel self-start rounded-xl border p-5">
+      <summary class="cursor-pointer list-none">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-medium">Recent Task Activity</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Expand only when you want the latest changes.</p>
+          </div>
+          <span class="text-sm text-slate-500 dark:text-slate-400">{{ all_tasks|length }}</span>
+        </div>
+      </summary>
+      <div class="mt-4 space-y-2">
+        {% for task in all_tasks[:8] %}
+        <a href="/tasks/{{ task.id }}" class="{% if task.due_date < today and task.status.value != 'completed' %}app-status-overdue{% elif task.status.value == 'in_progress' %}app-status-progress{% elif not task.assignee_id %}app-status-unassigned{% else %}app-surface{% endif %} {% if task.personal_highlight_color %}app-task-highlight{% endif %} block rounded-md border px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800" {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}>
+          <p class="font-medium text-sm">{{ task.title }}</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            {{ task.status.value }} |
+            {% if not task.assignee_id %}
+              unassigned
+            {% else %}
+              assigned on {{ task.assignment_date }}
+            {% endif %}
+          </p>
+        </a>
+        {% else %}
+        <div class="rounded-md border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          No tasks yet. Create your first task to get started.
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+  </div>
 </div>
 {% endblock %}

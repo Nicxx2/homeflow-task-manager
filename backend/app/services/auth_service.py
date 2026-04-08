@@ -10,6 +10,9 @@ from backend.app.schemas.auth import RegisterRequest
 
 class AuthService:
     ALLOWED_THEME_PREFERENCES = {"light", "dark", "system"}
+    ALLOWED_SURFACE_STYLES = {"clean", "soft", "contrast"}
+    ALLOWED_DENSITY_PREFERENCES = {"comfortable", "compact"}
+    ALLOWED_DECORATION_STYLES = {"none", "glow", "petals"}
     APPROVAL_PENDING = "pending"
     APPROVAL_APPROVED = "approved"
     APPROVAL_REJECTED = "rejected"
@@ -86,3 +89,58 @@ class AuthService:
         self.db.commit()
         self.db.refresh(user)
         return user
+
+    def update_appearance_preferences(
+        self,
+        user: User,
+        *,
+        theme_preference: str,
+        accent_color: str,
+        overdue_color: str,
+        recurring_color: str,
+        in_progress_color: str,
+        unassigned_color: str,
+        surface_style: str,
+        density_preference: str,
+        decoration_style: str,
+    ) -> User:
+        selected_theme = theme_preference.strip().lower()
+        if selected_theme not in self.ALLOWED_THEME_PREFERENCES:
+            raise ValueError("Invalid theme preference.")
+
+        selected_surface_style = surface_style.strip().lower()
+        if selected_surface_style not in self.ALLOWED_SURFACE_STYLES:
+            raise ValueError("Invalid surface style.")
+
+        selected_density = density_preference.strip().lower()
+        if selected_density not in self.ALLOWED_DENSITY_PREFERENCES:
+            raise ValueError("Invalid density preference.")
+
+        selected_decoration = decoration_style.strip().lower()
+        if selected_decoration not in self.ALLOWED_DECORATION_STYLES:
+            raise ValueError("Invalid decoration style.")
+
+        user.theme_preference = selected_theme
+        user.accent_color = self._normalize_hex_color(accent_color)
+        user.overdue_color = self._normalize_hex_color(overdue_color)
+        user.recurring_color = self._normalize_hex_color(recurring_color)
+        user.in_progress_color = self._normalize_hex_color(in_progress_color)
+        user.unassigned_color = self._normalize_hex_color(unassigned_color)
+        user.surface_style = selected_surface_style
+        user.density_preference = selected_density
+        user.decoration_style = selected_decoration
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    @staticmethod
+    def _normalize_hex_color(value: str) -> str:
+        selected = value.strip().lower()
+        if len(selected) != 7 or not selected.startswith("#"):
+            raise ValueError("Colors must use the #RRGGBB format.")
+        try:
+            int(selected[1:], 16)
+        except ValueError as exc:
+            raise ValueError("Colors must use the #RRGGBB format.") from exc
+        return selected

@@ -1,10 +1,10 @@
 {% set selected = result.suggested_level.value %}
 <div class="space-y-4">
-  <div class="rounded-md border p-3 {% if result.fallback_used %}bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:border-amber-800{% else %}bg-indigo-50 border-indigo-200 dark:bg-indigo-950/40 dark:border-indigo-800{% endif %}">
-    <p class="text-sm font-medium {% if result.fallback_used %}text-amber-900 dark:text-amber-200{% else %}text-indigo-900 dark:text-indigo-200{% endif %}">
+  <div class="rounded-md border p-3 {% if result.fallback_used %}bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:border-amber-800{% else %}app-surface app-outline-accent{% endif %}">
+    <p class="text-sm font-medium {% if result.fallback_used %}text-amber-900 dark:text-amber-200{% else %}app-link{% endif %}">
       AI Analysis Result
     </p>
-    <p class="text-xs mt-1 {% if result.fallback_used %}text-amber-800 dark:text-amber-300{% else %}text-indigo-800 dark:text-indigo-300{% endif %}">
+    <p class="mt-1 text-xs {% if result.fallback_used %}text-amber-800 dark:text-amber-300{% else %}text-slate-600 dark:text-slate-300{% endif %}">
       {% if result.fallback_used %}
       Source: Rules fallback (used because the primary provider was unavailable or invalid).
       {% else %}

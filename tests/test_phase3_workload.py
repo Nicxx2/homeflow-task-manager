@@ -9,6 +9,8 @@ from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user import User
 from backend.app.models.user_daily_capacity import UserDailyCapacity
 from backend.app.schemas.task import TaskCreate
+from backend.app.services.recurring_task_service import RecurringTaskService
+from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
 from backend.app.services.workload_service import WorkloadService
 
@@ -152,6 +154,100 @@ def test_validate_assignment_exclude_task_id_allows_reassignment_check():
         db.close()
 
 
+def test_assignment_larger_than_capacity_is_marked_impossible():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator6-{token}@example.com", 10)
+        assignee = _create_user(db, f"phase3-assignee6-{token}@example.com", 6)
+        day = date.today() + timedelta(days=6)
+
+        task = _create_task(db, creator, EffortLevel.HIGH, "Oversized task", day)
+        result = WorkloadService(db).validate_assignment(
+            user_id=assignee.id,
+            date_value=day,
+            task_points=task.points_value,
+        )
+
+        assert result["valid"] is False
+        assert result["task_too_large"] is True
+        assert result["next_available_date"] is None
+        assert "cannot be assigned on any day" in result["message"]
+    finally:
+        db.close()
+
+
+def test_assignment_in_past_is_rejected_and_suggests_current_slot():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator10-{token}@example.com", 10)
+        assignee = _create_user(db, f"phase3-assignee10-{token}@example.com", 8)
+        task = _create_task(db, creator, EffortLevel.LOW, "Past assignment", date.today())
+        past_day = date.fromordinal(date.today().toordinal() - 1)
+
+        result = WorkloadService(db).validate_assignment(
+            user_id=assignee.id,
+            date_value=past_day,
+            task_points=task.points_value,
+        )
+
+        assert result["valid"] is False
+        assert result["is_past_date"] is True
+        assert result["message"] == "Assignment date cannot be in the past."
+        assert result["next_available_date"] is not None
+        assert date.fromisoformat(result["next_available_date"]) >= date.today()
+    finally:
+        db.close()
+
+
+def test_suggest_next_available_date_skips_blocked_weekdays_and_away_periods():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator7-{token}@example.com", 10)
+        assignee = _create_user(db, f"phase3-assignee7-{token}@example.com", 8)
+        scheduling = SchedulingService(db)
+        scheduling.update_preferences(
+            user_id=assignee.id,
+            allowed_days={
+                "monday": True,
+                "tuesday": True,
+                "wednesday": True,
+                "thursday": True,
+                "friday": True,
+                "saturday": False,
+                "sunday": False,
+            },
+        )
+
+        start = date(2026, 4, 11)  # Saturday
+        scheduling.add_away_period(
+            user_id=assignee.id,
+            start_date=date(2026, 4, 14),
+            end_date=date(2026, 4, 14),
+            note="Away Tuesday",
+        )
+
+        monday_full = _create_task(db, creator, EffortLevel.HIGH, "Monday full", date(2026, 4, 13))
+        TaskService(db).assign_task(monday_full, assignee_id=assignee.id, assignment_date=date(2026, 4, 13))
+
+        task = _create_task(db, creator, EffortLevel.LOW, "Blocked start", start)
+        suggestion = WorkloadService(db).suggest_next_available_date(
+            user_id=assignee.id,
+            task_points=task.points_value,
+            start_date=start,
+            max_days=7,
+        )
+
+        assert suggestion == date(2026, 4, 15)
+    finally:
+        db.close()
+
+
 def test_get_daily_points_includes_completed_tasks():
     db = SessionLocal()
     try:
@@ -172,5 +268,104 @@ def test_get_daily_points_includes_completed_tasks():
 
         points = WorkloadService(db).get_daily_points(user_id=assignee.id, date_value=day)
         assert points == 7
+    finally:
+        db.close()
+
+
+def test_weekly_recurring_task_rolls_forward_with_single_active_task():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator8-{token}@example.com", 10)
+        assignee = _create_user(db, f"phase3-assignee8-{token}@example.com", 10)
+        scheduling = SchedulingService(db)
+        scheduling.add_away_period(
+            user_id=assignee.id,
+            start_date=date(2026, 4, 15),
+            end_date=date(2026, 4, 15),
+            note="Away on Wednesday",
+        )
+
+        payload = TaskCreate(
+            title="Weekly bins",
+            description="Take bins out",
+            due_date=date(2026, 4, 8),
+            effort_level=EffortLevel.LOW,
+            ai_suggested_level=EffortLevel.LOW,
+            ai_confidence=0.7,
+            ai_reason="test",
+            fallback_used=False,
+            provider_used="rules",
+            model_used="rules-default",
+            recurrence_pattern="weekly",
+            recurrence_interval_weeks=1,
+            recurrence_count_limit=4,
+            recurrence_blocked_behavior="move_same_week",
+        )
+        root = TaskService(db).create_unassigned_task(payload, creator)
+        TaskService(db).assign_task(root, assignee_id=assignee.id, assignment_date=root.due_date)
+
+        service = TaskService(db)
+        service.update_status(root, TaskStatus.COMPLETED)
+        db.refresh(root)
+
+        assert root.status == TaskStatus.PENDING
+        assert root.due_date == date(2026, 4, 16)
+        assert root.assignment_date == date(2026, 4, 16)
+
+        history = RecurringTaskService(db).get_history(root.id)
+        assert len(history) == 1
+        assert history[0].due_date == date(2026, 4, 8)
+
+        service.update_status(root, TaskStatus.COMPLETED)
+        db.refresh(root)
+
+        assert root.status == TaskStatus.PENDING
+        assert root.due_date == date(2026, 4, 22)
+        assert root.assignment_date == date(2026, 4, 22)
+
+        history = RecurringTaskService(db).get_history(root.id)
+        assert [item.due_date for item in reversed(history)] == [
+            date(2026, 4, 8),
+            date(2026, 4, 16),
+        ]
+    finally:
+        db.close()
+
+
+def test_recurring_sync_removes_legacy_future_occurrences():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator9-{token}@example.com", 10)
+        root = _create_task(db, creator, EffortLevel.LOW, "Legacy recurring", date(2026, 4, 8))
+        root.recurrence_pattern = "weekly"
+        root.recurrence_interval_weeks = 1
+        root.recurrence_anchor_date = date(2026, 4, 8)
+        db.add(root)
+        db.commit()
+
+        legacy_child = Task(
+            title=root.title,
+            description=root.description,
+            due_date=date(2026, 4, 15),
+            assignment_date=None,
+            assignee_id=None,
+            created_by_id=root.created_by_id,
+            effort_level=root.effort_level,
+            points_value=root.points_value,
+            status=TaskStatus.PENDING,
+            recurrence_parent_id=root.id,
+        )
+        db.add(legacy_child)
+        db.commit()
+
+        removed = RecurringTaskService(db).sync()
+        remaining = db.query(Task).filter(Task.recurrence_parent_id == root.id).all()
+
+        assert removed == 1
+        assert remaining == []
     finally:
         db.close()

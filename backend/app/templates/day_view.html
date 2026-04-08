@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<header class="flex items-center justify-between mb-6">
+<header class="density-header mb-6 flex items-center justify-between">
   <div>
     <h1 class="text-2xl font-semibold">Day View</h1>
     <p class="text-slate-500 dark:text-slate-400">
@@ -21,23 +21,23 @@
 <section class="mb-4 flex items-center gap-2">
   <a
     href="/day-view?day={{ target_day }}&scope=team"
-    class="rounded-md px-3 py-2 text-sm {% if scope == 'team' %}bg-indigo-600 text-white{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+    class="rounded-md px-3 py-2 text-sm {% if scope == 'team' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
   >
     Everyone
   </a>
   <a
     href="/day-view?day={{ target_day }}&scope=mine"
-    class="rounded-md px-3 py-2 text-sm {% if scope == 'mine' %}bg-indigo-600 text-white{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+    class="rounded-md px-3 py-2 text-sm {% if scope == 'mine' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
   >
     Just mine
   </a>
 </section>
 
-<section class="space-y-4">
+<section class="density-stack space-y-4">
   {% for row in rows %}
-  <article class="bg-white rounded-xl border border-slate-200 p-4 dark:bg-slate-900 dark:border-slate-800">
+  <article class="app-surface density-panel rounded-xl border p-4">
     <div class="flex items-center justify-between mb-3">
-      <h2 class="font-medium">{{ row.member.full_name }}</h2>
+      <h2 class="app-user-accent font-medium">{{ row.member.full_name }}</h2>
       <div class="text-right text-sm text-slate-600 dark:text-slate-300">
         <p>{{ row.points }} / {{ row.capacity if row.capacity is not none else "not set" }} pts</p>
         <p class="text-xs text-slate-500 dark:text-slate-400">
@@ -53,10 +53,18 @@
     </div>
     <div class="space-y-2">
       {% for item in row.tasks %}
-      <div class="border border-slate-200 rounded-md px-3 py-2 dark:border-slate-700">
+      <div class="{% if item.task.due_date < target_day and item.task.status.value != 'completed' %}app-status-overdue{% elif item.task.status.value == 'in_progress' %}app-status-progress{% elif item.task.assignee_id is none %}app-status-unassigned{% else %}app-surface{% endif %} {% if item.task.personal_highlight_color %}app-task-highlight{% endif %} rounded-md border px-3 py-2" {% if item.task.personal_highlight_color %}style="--task-highlight: {{ item.task.personal_highlight_color }};"{% endif %}>
         {% if item.can_open %}
         <a href="/tasks/{{ item.task.id }}" class="block hover:bg-slate-50 dark:hover:bg-slate-800">
-          <p class="text-sm font-medium">{{ item.task.title }}</p>
+          <div class="flex items-center gap-2">
+            <p class="app-task-title text-sm font-medium">{{ item.task.title }}</p>
+            {% if item.task.recurrence_pattern == "weekly" %}
+            <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">Recurring</span>
+            {% endif %}
+            {% if item.task.personal_highlight_color %}
+            <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-700 dark:text-slate-200" style="border-color: {{ item.task.personal_highlight_color }}; color: {{ item.task.personal_highlight_color }};">My highlight</span>
+            {% endif %}
+          </div>
           <p class="text-xs text-slate-500 dark:text-slate-400">{{ item.task.points_value }} pts | {{ item.task.status.value }}</p>
         </a>
         {% if item.can_update_status %}
@@ -74,7 +82,15 @@
         </form>
         {% endif %}
         {% else %}
-        <p class="text-sm font-medium">{{ item.task.title }}</p>
+        <div class="flex items-center gap-2">
+          <p class="app-task-title text-sm font-medium">{{ item.task.title }}</p>
+          {% if item.task.recurrence_pattern == "weekly" %}
+          <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">Recurring</span>
+          {% endif %}
+          {% if item.task.personal_highlight_color %}
+          <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-700 dark:text-slate-200" style="border-color: {{ item.task.personal_highlight_color }}; color: {{ item.task.personal_highlight_color }};">My highlight</span>
+          {% endif %}
+        </div>
         <p class="text-xs text-slate-500 dark:text-slate-400">{{ item.task.points_value }} pts | {{ item.task.status.value }}</p>
         {% endif %}
       </div>

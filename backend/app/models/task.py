@@ -19,6 +19,14 @@ class Task(Base):
             "(assignee_id IS NULL AND assignment_date IS NULL) OR (assignee_id IS NOT NULL AND assignment_date IS NOT NULL)",
             name="ck_tasks_assignment_pair",
         ),
+        CheckConstraint(
+            "(recurrence_interval_weeks IS NULL) OR (recurrence_interval_weeks > 0)",
+            name="ck_tasks_recurrence_interval_positive",
+        ),
+        CheckConstraint(
+            "(recurrence_count_limit IS NULL) OR (recurrence_count_limit > 0)",
+            name="ck_tasks_recurrence_count_positive",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -46,6 +54,13 @@ class Task(Base):
     ai_provider_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ai_model_used: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fallback_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    recurrence_pattern: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    recurrence_interval_weeks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recurrence_until: Mapped[date | None] = mapped_column(Date, nullable=True)
+    recurrence_count_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recurrence_blocked_behavior: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    recurrence_parent_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True, index=True)
+    recurrence_anchor_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -53,3 +68,4 @@ class Task(Base):
 
     assignee = relationship("User", foreign_keys=[assignee_id], back_populates="assigned_tasks")
     created_by = relationship("User", foreign_keys=[created_by_id], back_populates="created_tasks")
+    recurrence_parent = relationship("Task", remote_side=[id])

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="density-header mb-6">
+  <h1 class="text-2xl font-semibold">My Schedule</h1>
+  <p class="text-slate-500 dark:text-slate-400">Choose which days can receive tasks and mark periods when you are away.</p>
+</header>
+
+{% if form_error %}
+<div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
+  {{ form_error }}
+</div>
+{% endif %}
+
+<div class="density-stack grid gap-6 md:grid-cols-2">
+  <section class="app-surface density-panel rounded-xl border p-5">
+    <h2 class="font-medium">Available Days</h2>
+    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+      Uncheck days you do not want the scheduler to use. Away periods will still block dates separately.
+    </p>
+
+    <form method="post" action="/schedule/preferences" class="density-stack mt-4 space-y-3">
+      {% for item in weekday_options %}
+      <label class="app-surface flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+        <input type="checkbox" name="allow_{{ item.key }}" value="true" {% if item.allowed %}checked{% endif %} />
+        <span>{{ item.label }}</span>
+      </label>
+      {% endfor %}
+      <button class="app-primary-button rounded-md px-4 py-2 text-sm" type="submit">
+        Save schedule preferences
+      </button>
+    </form>
+  </section>
+
+  <section class="app-surface density-panel rounded-xl border p-5">
+    <h2 class="font-medium">Away Periods</h2>
+    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+      Tasks will not be scheduled on these dates unless an admin explicitly overrides the block.
+    </p>
+
+    <form method="post" action="/schedule/away" class="mt-4 grid gap-3">
+      <label class="text-sm">
+        <span class="mb-1 block">Start date</span>
+        <input type="date" name="start_date" required class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <label class="text-sm">
+        <span class="mb-1 block">End date</span>
+        <input type="date" name="end_date" required class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <label class="text-sm">
+        <span class="mb-1 block">Note (optional)</span>
+        <input type="text" name="note" maxlength="255" placeholder="Holiday, travel, busy week..." class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <button class="app-primary-button rounded-md px-4 py-2 text-sm" type="submit">
+        Add away period
+      </button>
+    </form>
+
+    <div class="mt-5 space-y-2">
+      {% for period in away_periods %}
+      <div class="rounded-md border border-slate-200 px-3 py-3 text-sm dark:border-slate-700">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="font-medium">{{ period.start_date }} to {{ period.end_date }}</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ period.note or "Away" }}</p>
+          </div>
+          <form method="post" action="/schedule/away/{{ period.id }}/delete">
+            <button class="rounded-md border border-slate-300 px-3 py-2 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">
+              Remove
+            </button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-500 dark:text-slate-400">No away periods saved.</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -8,11 +8,13 @@ from backend.app.db.session import SessionLocal, engine
 from backend.app.main import app
 from backend.app.core.security import create_access_token
 from backend.app.models.enums import EffortLevel, TaskStatus
+from backend.app.models.task import Task
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user_daily_capacity import UserDailyCapacity
 from backend.app.schemas.auth import RegisterRequest
 from backend.app.schemas.task import TaskCreate
 from backend.app.services.auth_service import AuthService
+from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
 
 
@@ -170,6 +172,472 @@ def test_quick_status_update_redirects_back_to_current_view():
 
         db.refresh(task)
         assert task.status == TaskStatus.COMPLETED
+    finally:
+        db.close()
+
+
+def test_assignment_success_redirects_to_tasks_list():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"assign-redirect-{token}@example.com",
+            full_name="Assign Redirect",
+            capacity=10,
+        )
+        day = date.today() + timedelta(days=5)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Assign Redirect Task {token}",
+                description="Redirect test",
+                due_date=day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post(
+            f"/tasks/{task.id}/assign",
+            data={"assignee_id": viewer.id, "assignment_date": day.isoformat()},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/tasks"
+    finally:
+        db.close()
+
+
+def test_assignment_feedback_shows_suggested_date_action():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"assign-feedback-{token}@example.com",
+            full_name="Assign Feedback",
+            capacity=6,
+        )
+        day = date.today() + timedelta(days=6)
+        existing = _create_task(db, creator=viewer, assignee=viewer, title=f"Existing Load {token}", day=day)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Needs Suggestion {token}",
+                description="Suggestion test",
+                due_date=day,
+                effort_level=EffortLevel.MEDIUM,
+                ai_suggested_level=EffortLevel.MEDIUM,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        assert existing.points_value == 5
+        assert task.points_value == 5
+
+        client = _authed_client(viewer)
+        response = client.get(
+            f"/tasks/{task.id}/assignment-check?assignee_id={viewer.id}&assignment_date={day.isoformat()}"
+        )
+
+        assert response.status_code == 200
+        assert "Use suggested date" in response.text
+    finally:
+        db.close()
+
+
+def test_assignment_in_past_is_blocked_in_web_flow():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"assign-past-{token}@example.com",
+            full_name="Assign Past",
+            capacity=10,
+        )
+        day = date.today()
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Past Block Task {token}",
+                description="Past date test",
+                due_date=day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        past_day = date.fromordinal(date.today().toordinal() - 1)
+        client = _authed_client(viewer)
+        response = client.post(
+            f"/tasks/{task.id}/assign",
+            data={"assignee_id": viewer.id, "assignment_date": past_day.isoformat()},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 400
+        assert "Assignment date cannot be in the past." in response.text
+    finally:
+        db.close()
+
+
+def test_user_can_save_schedule_preferences_and_away_periods():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"schedule-viewer-{token}@example.com",
+            full_name="Schedule Viewer",
+            capacity=10,
+        )
+
+        client = _authed_client(viewer)
+        pref_response = client.post(
+            "/schedule/preferences",
+            data={
+                "allow_monday": "true",
+                "allow_tuesday": "true",
+                "allow_wednesday": "true",
+                "allow_thursday": "true",
+                "allow_friday": "true",
+            },
+            follow_redirects=False,
+        )
+        away_response = client.post(
+            "/schedule/away",
+            data={
+                "start_date": "2026-04-20",
+                "end_date": "2026-04-22",
+                "note": "Trip",
+            },
+            follow_redirects=False,
+        )
+
+        assert pref_response.status_code == 302
+        assert away_response.status_code == 302
+
+        scheduling = SchedulingService(db)
+        preferences = scheduling.get_preferences_map(viewer.id)
+        assert preferences["saturday"] is False
+        assert preferences["sunday"] is False
+        periods = scheduling.list_away_periods(viewer.id)
+        assert periods[0].note == "Trip"
+    finally:
+        db.close()
+
+
+def test_user_can_save_personal_appearance_without_affecting_others():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"appearance-viewer-{token}@example.com",
+            full_name="Appearance Viewer",
+            capacity=10,
+        )
+        other = _create_user(
+            db,
+            email=f"appearance-other-{token}@example.com",
+            full_name="Appearance Other",
+            capacity=10,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post(
+            "/appearance",
+            data={
+                "theme_preference": "dark",
+                "accent_color": "#123abc",
+                "overdue_color": "#aa2211",
+                "recurring_color": "#117766",
+                "in_progress_color": "#bb7700",
+                "unassigned_color": "#334455",
+                "surface_style": "soft",
+                "density_preference": "compact",
+                "decoration_style": "glow",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/appearance"
+
+        db.refresh(viewer)
+        db.refresh(other)
+        assert viewer.accent_color == "#123abc"
+        assert viewer.surface_style == "soft"
+        assert viewer.density_preference == "compact"
+        assert viewer.decoration_style == "glow"
+        assert other.accent_color == "#4f46e5"
+        assert other.surface_style == "clean"
+
+        viewer_dashboard = client.get("/dashboard")
+        other_dashboard = _authed_client(other).get("/dashboard")
+        assert "#123abc" in viewer_dashboard.text
+        assert "#123abc" not in other_dashboard.text
+    finally:
+        db.close()
+
+
+def test_invalid_appearance_color_is_rejected():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"appearance-invalid-{token}@example.com",
+            full_name="Appearance Invalid",
+            capacity=10,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post(
+            "/appearance",
+            data={
+                "theme_preference": "light",
+                "accent_color": "red",
+                "overdue_color": "#dc2626",
+                "recurring_color": "#0f766e",
+                "in_progress_color": "#d97706",
+                "unassigned_color": "#475569",
+                "surface_style": "clean",
+                "density_preference": "comfortable",
+                "decoration_style": "none",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 400
+        assert "#RRGGBB" in response.text
+    finally:
+        db.close()
+
+
+def test_user_can_create_task_with_personal_highlight():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"task-highlight-create-{token}@example.com",
+            full_name="Task Highlight Create",
+            capacity=10,
+        )
+
+        client = _authed_client(viewer)
+        due_day = (date.today() + timedelta(days=3)).isoformat()
+        response = client.post(
+            "/tasks",
+            data={
+                "title": f"Highlighted Task {token}",
+                "description": "Personal highlight test",
+                "due_date": due_day,
+                "effort_level": EffortLevel.LOW.value,
+                "ai_suggested_level": EffortLevel.LOW.value,
+                "ai_confidence": "0.7",
+                "ai_reason": "test",
+                "fallback_used": "false",
+                "provider_used": "rules",
+                "model_used": "rules-default",
+                "use_personal_highlight": "true",
+                "personal_highlight_color": "#2255aa",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        task = db.query(Task).filter(Task.title == f"Highlighted Task {token}").first()
+        assert task is not None
+
+        detail = client.get(f"/tasks/{task.id}")
+        assert detail.status_code == 200
+        assert "#2255aa" in detail.text
+    finally:
+        db.close()
+
+
+def test_task_highlight_is_personal_only():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"task-highlight-viewer-{token}@example.com",
+            full_name="Task Highlight Viewer",
+            capacity=10,
+        )
+        other = _create_user(
+            db,
+            email=f"task-highlight-other-{token}@example.com",
+            full_name="Task Highlight Other",
+            capacity=10,
+        )
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Personal Color Task {token}",
+                description="Highlight test",
+                due_date=date.today() + timedelta(days=4),
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        viewer_client = _authed_client(viewer)
+        save_response = viewer_client.post(
+            f"/tasks/{task.id}/display",
+            data={
+                "use_personal_highlight": "true",
+                "personal_highlight_color": "#993366",
+            },
+            follow_redirects=False,
+        )
+        assert save_response.status_code == 302
+
+        viewer_tasks = viewer_client.get("/tasks")
+        other_tasks = _authed_client(other).get("/tasks")
+
+        assert viewer_tasks.status_code == 200
+        assert other_tasks.status_code == 200
+        assert "#993366" in viewer_tasks.text
+        assert "#993366" not in other_tasks.text
+    finally:
+        db.close()
+
+
+def test_past_away_periods_are_removed_automatically():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"schedule-cleanup-{token}@example.com",
+            full_name="Schedule Cleanup",
+            capacity=10,
+        )
+        scheduling = SchedulingService(db)
+        scheduling.add_away_period(
+            user_id=viewer.id,
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 4, 2),
+            note="Past trip",
+        )
+        scheduling.add_away_period(
+            user_id=viewer.id,
+            start_date=date(2026, 4, 20),
+            end_date=date(2026, 4, 22),
+            note="Upcoming trip",
+        )
+
+        removed = scheduling.purge_expired_away_periods(user_id=viewer.id, reference_date=date(2026, 4, 10))
+        periods = scheduling.list_away_periods(viewer.id)
+
+        assert removed == 1
+        assert len(periods) == 1
+        assert periods[0].note == "Upcoming trip"
+    finally:
+        db.close()
+
+
+def test_admin_can_override_blocked_schedule_date():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        admin = _create_user(
+            db,
+            email=f"schedule-admin-{token}@example.com",
+            full_name="Schedule Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+        member = _create_user(
+            db,
+            email=f"schedule-member-{token}@example.com",
+            full_name="Schedule Member",
+            capacity=10,
+        )
+        scheduling = SchedulingService(db)
+        scheduling.add_away_period(
+            user_id=member.id,
+            start_date=date(2026, 4, 18),
+            end_date=date(2026, 4, 18),
+            note="Away day",
+        )
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Override Task {token}",
+                description="Admin override test",
+                due_date=date(2026, 4, 18),
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            admin,
+        )
+
+        client = _authed_client(admin)
+        blocked = client.post(
+            f"/tasks/{task.id}/assign",
+            data={"assignee_id": member.id, "assignment_date": "2026-04-18"},
+            follow_redirects=False,
+        )
+        allowed = client.post(
+            f"/tasks/{task.id}/assign",
+            data={
+                "assignee_id": member.id,
+                "assignment_date": "2026-04-18",
+                "allow_policy_override": "true",
+            },
+            follow_redirects=False,
+        )
+
+        assert blocked.status_code == 400
+        assert "blocked by the user's schedule" in blocked.text
+        assert allowed.status_code == 302
+        assert allowed.headers["location"] == "/tasks"
+
+        db.refresh(task)
+        assert task.assignee_id == member.id
     finally:
         db.close()
 

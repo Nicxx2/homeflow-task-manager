@@ -7,6 +7,7 @@ from backend.app.models.enums import EffortLevel, TaskStatus
 from backend.app.models.task import Task
 from backend.app.models.user import User
 from backend.app.services.auth_service import AuthService
+from backend.app.services.recurring_task_service import RecurringTaskService
 from backend.app.services.task_service import TaskService
 from backend.app.services.workload_service import WorkloadService
 
@@ -19,6 +20,7 @@ class AppAssistantService:
         self.workload = WorkloadService(db)
 
     def respond(self, message: str, context_items: list[dict] | None = None) -> dict:
+        RecurringTaskService(self.db).sync()
         query = " ".join(message.lower().split())
         if not query:
             return self._help_response()
@@ -77,7 +79,7 @@ class AppAssistantService:
             if next_date:
                 return {
                     "ok": False,
-                    "reply": f"That assignment would exceed your capacity on {assignment_date}. Next available date: {next_date}.",
+                    "reply": f"{validation['message']} Next available date: {next_date}.",
                 }
             return {"ok": False, "reply": validation["message"]}
 

@@ -8,6 +8,7 @@ from backend.app.models.task import Task
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user import User
 from backend.app.schemas.task import TaskCreate, TaskUpdate
+from backend.app.services.recurring_task_service import RecurringTaskService
 from backend.app.services.workload_service import WorkloadService
 
 
@@ -36,14 +37,22 @@ class TaskService:
             ai_provider_used=payload.provider_used,
             ai_model_used=payload.model_used,
             fallback_used=payload.fallback_used,
+            recurrence_pattern=payload.recurrence_pattern,
+            recurrence_interval_weeks=payload.recurrence_interval_weeks,
+            recurrence_until=payload.recurrence_until,
+            recurrence_count_limit=payload.recurrence_count_limit,
+            recurrence_blocked_behavior=payload.recurrence_blocked_behavior,
+            recurrence_anchor_date=payload.due_date if payload.recurrence_pattern else None,
         )
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)
         return task
 
-    def get_tasks(self, *, only_unassigned: bool | None = None) -> list[Task]:
+    def get_tasks(self, *, only_unassigned: bool | None = None, include_history: bool = False) -> list[Task]:
         stmt = select(Task).order_by(Task.due_date.asc(), Task.created_at.desc())
+        if not include_history:
+            stmt = stmt.where(Task.recurrence_parent_id.is_(None))
         if only_unassigned is True:
             stmt = stmt.where(Task.assignee_id.is_(None))
         if only_unassigned is False:
@@ -72,12 +81,24 @@ class TaskService:
         task.effort_level = payload.effort_level
         task.points_value = self._points_for_level(payload.effort_level)
         task.status = payload.status
+        task.recurrence_pattern = payload.recurrence_pattern
+        task.recurrence_interval_weeks = payload.recurrence_interval_weeks
+        task.recurrence_until = payload.recurrence_until
+        task.recurrence_count_limit = payload.recurrence_count_limit
+        task.recurrence_blocked_behavior = payload.recurrence_blocked_behavior
+        task.recurrence_anchor_date = payload.due_date if payload.recurrence_pattern else None
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)
         return task
 
     def update_status(self, task: Task, status: TaskStatus) -> Task:
+        if (
+            task.recurrence_pattern == "weekly"
+            and task.recurrence_parent_id is None
+            and status == TaskStatus.COMPLETED
+        ):
+            return RecurringTaskService(self.db).complete_occurrence(task)
         task.status = status
         self.db.add(task)
         self.db.commit()
@@ -92,12 +113,20 @@ class TaskService:
         self.db.refresh(task)
         return task
 
-    def assign_task_with_validation(self, task: Task, *, assignee_id: int, assignment_date: date) -> tuple[bool, dict]:
+    def assign_task_with_validation(
+        self,
+        task: Task,
+        *,
+        assignee_id: int,
+        assignment_date: date,
+        allow_policy_override: bool = False,
+    ) -> tuple[bool, dict]:
         validation = WorkloadService(self.db).validate_assignment(
             user_id=assignee_id,
             date_value=assignment_date,
             task_points=task.points_value,
             exclude_task_id=task.id,
+            allow_policy_override=allow_policy_override,
         )
         if not validation["valid"]:
             return False, validation
