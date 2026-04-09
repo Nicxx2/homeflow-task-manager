@@ -33,7 +33,8 @@ class SchedulingService:
         return pref
 
     def purge_expired_away_periods(self, *, user_id: int | None = None, reference_date: date | None = None) -> int:
-        cutoff = reference_date or date.today()
+        today = date.today()
+        cutoff = today if reference_date is None else min(reference_date, today)
         stmt = select(UserAwayPeriod).where(UserAwayPeriod.end_date < cutoff)
         if user_id is not None:
             stmt = stmt.where(UserAwayPeriod.user_id == user_id)

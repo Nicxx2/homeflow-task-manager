@@ -248,6 +248,38 @@ def test_suggest_next_available_date_skips_blocked_weekdays_and_away_periods():
         db.close()
 
 
+def test_future_lookup_does_not_delete_upcoming_away_period():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        assignee = _create_user(db, f"phase3-assignee-away-{token}@example.com", 8)
+        scheduling = SchedulingService(db)
+        start = date.today() + timedelta(days=2)
+        end = start + timedelta(days=1)
+
+        scheduling.add_away_period(
+            user_id=assignee.id,
+            start_date=start,
+            end_date=end,
+            note="Upcoming trip",
+        )
+
+        future_check = end + timedelta(days=7)
+        assert scheduling.get_block_for_date(user_id=assignee.id, date_value=future_check) is None
+
+        periods = scheduling.list_away_periods(assignee.id)
+        assert len(periods) == 1
+        assert periods[0].start_date == start
+        assert periods[0].end_date == end
+
+        block = scheduling.get_block_for_date(user_id=assignee.id, date_value=start)
+        assert block is not None
+        assert block["type"] == "away"
+    finally:
+        db.close()
+
+
 def test_get_daily_points_includes_completed_tasks():
     db = SessionLocal()
     try:
