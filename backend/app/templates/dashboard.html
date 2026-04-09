@@ -93,8 +93,8 @@
           {% else %}
           <p>Remaining: {{ item.remaining_capacity | abs }} pts over</p>
           {% endif %}
-          {% if item.tasks_today %}
-          <p {% if item.tasks_today[0].personal_highlight_color %}class="app-user-accent" style="color: {{ item.tasks_today[0].personal_highlight_color }};"{% endif %}>Next task: {{ item.tasks_today[0].title }}</p>
+          {% if item.next_task %}
+          <p {% if item.next_task.personal_highlight_color %}class="app-user-accent" style="color: {{ item.next_task.personal_highlight_color }};"{% endif %}>Next task: {{ item.next_task.title }}</p>
           {% endif %}
         </div>
       </div>

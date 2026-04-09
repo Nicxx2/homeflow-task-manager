@@ -144,6 +144,71 @@ def test_dashboard_renders_unassigned_overdue_tasks():
         db.close()
 
 
+def test_dashboard_next_task_skips_completed_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"dashboard-skip-completed-viewer-{token}@example.com",
+            full_name="Dashboard Skip Completed Viewer",
+            capacity=8,
+            show_in_member_lists=False,
+        )
+        teammate = _create_user(
+            db,
+            email=f"dashboard-skip-completed-mate-{token}@example.com",
+            full_name="Dashboard Skip Completed Mate",
+            capacity=8,
+        )
+        day = date.today()
+        first_task = _create_task(db, creator=viewer, assignee=teammate, title=f"Done First {token}", day=day)
+        second_task = _create_task(db, creator=viewer, assignee=teammate, title=f"Still Open {token}", day=day)
+        TaskService(db).update_status(first_task, TaskStatus.COMPLETED)
+
+        client = _authed_client(viewer)
+        response = client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert f"Next task: Still Open {token}" in response.text
+        assert f"Next task: Done First {token}" not in response.text
+    finally:
+        db.close()
+
+
+def test_dashboard_hides_next_task_when_all_tasks_for_today_are_completed():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"dashboard-all-complete-viewer-{token}@example.com",
+            full_name="Dashboard All Complete Viewer",
+            capacity=8,
+            show_in_member_lists=False,
+        )
+        teammate = _create_user(
+            db,
+            email=f"dashboard-all-complete-mate-{token}@example.com",
+            full_name="Dashboard All Complete Mate",
+            capacity=8,
+        )
+        day = date.today()
+        completed_task = _create_task(db, creator=viewer, assignee=teammate, title=f"Finished {token}", day=day)
+        TaskService(db).update_status(completed_task, TaskStatus.COMPLETED)
+
+        client = _authed_client(viewer)
+        response = client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert f"Finished {token}" in response.text
+        assert "Next task:" not in response.text
+    finally:
+        db.close()
+
+
 def test_non_admin_day_view_can_toggle_between_team_and_mine():
     db = SessionLocal()
     try:

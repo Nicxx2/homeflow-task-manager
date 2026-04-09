@@ -319,6 +319,7 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
         remaining_capacity = None if capacity is None else capacity - points
         schedule_block = workload.scheduling.get_block_for_date(user_id=item.id, date_value=today)
         tasks_today = workload.get_tasks_for_user_on_date(user_id=item.id, date_value=today)
+        next_task = next((task for task in tasks_today if task.status != TaskStatus.COMPLETED), None)
         _apply_personal_task_highlights(db=db, user=user, tasks=tasks_today)
         status_label = "Capacity unset"
         status_tone = "slate"
@@ -344,6 +345,7 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
                 "capacity": capacity,
                 "remaining_capacity": remaining_capacity,
                 "tasks_today": tasks_today,
+                "next_task": next_task,
                 "status_label": status_label,
                 "status_tone": status_tone,
                 "schedule_block": schedule_block,
