@@ -15,14 +15,18 @@ env/
 
 # Flutter / Android local build output
 mobile/app/.dart_tool/
+mobile/app/.idea/
 mobile/app/build/
 mobile/app/.flutter-plugins
 mobile/app/.flutter-plugins-dependencies
 mobile/app/.packages
 mobile/app/pubspec_overrides.yaml
+mobile/app/*.iml
 mobile/app/android/.gradle/
+mobile/app/android/.kotlin/
 mobile/app/android/local.properties
 mobile/app/android/key.properties
+mobile/app/android/*.iml
 
 *.db
 *.db-journal
