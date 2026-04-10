@@ -1,3 +1,10 @@
+## 💖 Support This Project
+
+If you found this helpful and want to support what I do, you can leave a tip here — thank you so much!
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/nicxx2)
+
+---
 # homeflow-task-manager
 
 Plan tasks without overload. Built-in workload limits, smart scheduling, recurring task handling, and personal customization keep plans realistic and easier to follow.
