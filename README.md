@@ -1,3 +1,18 @@
+![Sponsored OSS](https://img.shields.io/badge/Sponsored-OSS-8a3af8?logo=github-sponsors&logoColor=white)
+
+![Docker Pulls](https://img.shields.io/docker/pulls/nicxx2/homeflow-task-manager)
+
+![License](https://img.shields.io/github/license/Nicxx2/homeflow-task-manager)
+
+
+---
+## 💖 Support This Project
+
+If you found this helpful and want to support what I do, you can leave a tip here — thank you so much!
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/nicxx2)
+
+---
 # homeflow-task-manager
 
 Plan tasks without overload. Built-in workload limits, smart scheduling, recurring task handling, and personal customization keep plans realistic and easier to follow.
@@ -34,20 +49,6 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2
-
-- Smarter assignment with automatic next-best-day suggestions
-- User away periods and weekday availability preferences
-- Cleaner recurring tasks with one active recurring task instead of cluttering the list with many future copies
-- Recurring tasks can skip blocked dates or move within the same week, then return to the normal schedule
-- Better overdue handling and task prioritization
-- Cleaner dashboard with expandable sections and stronger focus on today's workload
-- Task list grouped into clearer buckets such as overdue, upcoming, unassigned, in progress, and completed
-- Personal appearance settings for each user
-- Personal task highlighting and custom state colors without affecting other users
-
----
-
 ## What is new in v2.1
 
 - Mobile companion app for self-hosted Homeflow servers
@@ -61,6 +62,20 @@ If someone is away or has blocked days
 - Better `Just mine` and `Everyone` workflow
 - Better return flow after editing tasks so users go back to the task view they were already using
 - Per-user task category button appearance controls
+
+---
+
+## v2
+
+- Smarter assignment with automatic next-best-day suggestions
+- User away periods and weekday availability preferences
+- Cleaner recurring tasks with one active recurring task instead of cluttering the list with many future copies
+- Recurring tasks can skip blocked dates or move within the same week, then return to the normal schedule
+- Better overdue handling and task prioritization
+- Cleaner dashboard with expandable sections and stronger focus on today's workload
+- Task list grouped into clearer buckets such as overdue, upcoming, unassigned, in progress, and completed
+- Personal appearance settings for each user
+- Personal task highlighting and custom state colors without affecting other users
 
 ---
 
@@ -201,7 +216,7 @@ flutter build apk --debug
 
 ## Docker Hub Repository
 
-[https://hub.docker.com/r/nicxx2/homeflow-task-manager](https://hub.docker.com/r/nicxx2/homeflow-task-manager)
+👉[https://hub.docker.com/r/nicxx2/homeflow-task-manager](https://hub.docker.com/r/nicxx2/homeflow-task-manager)
 
 ---
 
