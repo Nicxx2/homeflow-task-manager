@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="mb-6">
+  <h1 class="text-2xl font-semibold">Admin Settings</h1>
+  <p class="text-slate-500 dark:text-slate-400">Manage workload defaults, capacity limits, and AI behavior.</p>
+</header>
+
+<div class="grid md:grid-cols-2 gap-6">
+  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800 md:col-span-2">
+    <h2 class="font-medium mb-1">Users</h2>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Approve registrations, manage visibility in member lists, and create users with optional defaults.</p>
+
+    <div class="mb-6">
+      <h3 class="font-medium mb-2">Pending registrations</h3>
+      <div class="space-y-2">
+        {% for pending_user in pending_users %}
+        <div class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900/40 dark:bg-amber-950/30">
+          <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p class="font-medium text-amber-900 dark:text-amber-200">{{ pending_user.full_name }}</p>
+              <p class="text-amber-800 dark:text-amber-300">{{ pending_user.email }}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <form method="post" action="/admin/settings/users/{{ pending_user.id }}/approve">
+                <button class="rounded-md bg-emerald-600 px-3 py-2 text-xs text-white hover:bg-emerald-700" type="submit">Approve</button>
+              </form>
+              <form method="post" action="/admin/settings/users/{{ pending_user.id }}/reject">
+                <button class="rounded-md border border-red-300 px-3 py-2 text-xs text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-950/30" type="submit">Reject</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-500 dark:text-slate-400">No pending account approvals.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <form method="post" action="/admin/settings/users" class="grid md:grid-cols-2 gap-4">
+      <label class="block text-sm">
+        <span class="mb-1 block">Email</span>
+        <input type="email" name="email" required class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block">Password</span>
+        <input type="password" name="password" required minlength="8" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block">Display name (optional)</span>
+        <input type="text" name="full_name" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block">Role</span>
+        <select name="role" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+          <option value="user">Normal user</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block">Daily capacity points (optional)</span>
+        <input type="number" min="1" name="daily_capacity_points" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block">Session timeout minutes (optional)</span>
+        <input type="number" min="1" name="session_timeout_minutes" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      </label>
+      <div class="md:col-span-2">
+      <button class="app-primary-button rounded-md px-4 py-2" type="submit">Create approved user</button>
+      </div>
+    </form>
+
+    {% if user_create_result %}
+      {% if user_create_result.ok %}
+      <div class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/40 dark:bg-emerald-950/30">
+        <p class="font-medium text-emerald-800 dark:text-emerald-200">{{ user_create_result.message }}</p>
+      </div>
+      {% else %}
+      <div class="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm dark:border-red-900/40 dark:bg-red-950/30">
+        <p class="font-medium text-red-800 dark:text-red-200">{{ user_create_result.error }}</p>
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <tr>
+            <th class="text-left px-3 py-2">Name</th>
+            <th class="text-left px-3 py-2">Email</th>
+            <th class="text-left px-3 py-2">Role</th>
+            <th class="text-left px-3 py-2">Approval</th>
+            <th class="text-left px-3 py-2">Member list</th>
+            <th class="text-left px-3 py-2">Session timeout</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row_user in all_users %}
+          <tr class="border-t border-slate-200 dark:border-slate-800">
+            <td class="px-3 py-2">{{ row_user.full_name }}</td>
+            <td class="px-3 py-2">{{ row_user.email }}</td>
+            <td class="px-3 py-2">{{ "Admin" if row_user.is_admin else "User" }}</td>
+            <td class="px-3 py-2">{{ row_user.approval_status }}</td>
+            <td class="px-3 py-2">
+              <form method="post" action="/admin/settings/users/{{ row_user.id }}/visibility" class="flex items-center gap-2">
+                <input type="hidden" name="visible_in_members" value="false" />
+                <input type="checkbox" name="visible_in_members" value="true" {% if row_user.show_in_member_lists %}checked{% endif %} onchange="this.form.submit()" />
+                <span>{{ "visible" if row_user.show_in_member_lists else "hidden" }}</span>
+              </form>
+            </td>
+            <td class="px-3 py-2">{{ row_user.session_timeout_minutes or "default" }}</td>
+          </tr>
+          {% else %}
+          <tr><td class="px-3 py-3 text-slate-500" colspan="6">No users found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800">
+    <h2 class="font-medium mb-1">Effort Point Values</h2>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">These values are used for workload calculations and assignment checks.</p>
+    <form method="post" action="/admin/settings/effort" class="space-y-3">
+      {% set low = (effort_configs | selectattr("level.value", "equalto", "low") | list | first) %}
+      {% set medium = (effort_configs | selectattr("level.value", "equalto", "medium") | list | first) %}
+      {% set high = (effort_configs | selectattr("level.value", "equalto", "high") | list | first) %}
+      <label class="block text-sm">Low points <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="low_points" value="{{ low.points_value if low else 2 }}" /></label>
+      <label class="block text-sm">Medium points <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="medium_points" value="{{ medium.points_value if medium else 5 }}" /></label>
+      <label class="block text-sm">High points <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="high_points" value="{{ high.points_value if high else 8 }}" /></label>
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save effort values</button>
+    </form>
+  </section>
+
+  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800">
+    <h2 class="font-medium mb-1">User Daily Capacity</h2>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Maximum points each user can carry per day.</p>
+    <form method="post" action="/admin/settings/capacity" class="space-y-3">
+      {% for item in user_caps %}
+      <label class="block text-sm">
+        {{ item[0].full_name }} ({{ item[0].email }})
+        <input class="w-full rounded-md border border-slate-300 px-3 py-2 mt-1 dark:border-slate-700 dark:bg-slate-800" type="number" min="1" name="cap_{{ item[0].id }}" value="{{ item[1] or '' }}" placeholder="e.g. 8" />
+      </label>
+      {% else %}
+      <p class="text-sm text-slate-500 dark:text-slate-400">No users found.</p>
+      {% endfor %}
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save capacities</button>
+    </form>
+  </section>
+</div>
+
+<section class="bg-white rounded-xl border border-slate-200 p-5 mt-6 dark:bg-slate-900 dark:border-slate-800">
+  <h2 class="font-medium mb-1">AI Settings</h2>
+  <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Configure provider, timeout, fallback behavior, and health checks.</p>
+  <form method="post" action="/admin/settings/ai" class="grid md:grid-cols-2 gap-4">
+    <label class="block text-sm">
+      <span class="mb-1 block">Enable AI</span>
+      <input type="checkbox" name="ai_enabled" {% if ai_settings.ai_enabled %}checked{% endif %} />
+      <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">If off, rules fallback is used.</span>
+    </label>
+    <label class="block text-sm">
+      <span class="mb-1 block">Timeout (seconds)</span>
+      <input type="number" min="1" name="timeout_seconds" value="{{ ai_settings.timeout_seconds }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Increase this for slower local CPU responses.</span>
+    </label>
+    <label class="block text-sm">
+      <span class="mb-1 block">Active provider</span>
+      <select name="active_provider" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+        <option value="ollama" {% if ai_settings.active_provider == "ollama" %}selected{% endif %}>ollama</option>
+        <option value="rules" {% if ai_settings.active_provider == "rules" %}selected{% endif %}>rules</option>
+      </select>
+    </label>
+    <label class="block text-sm">
+      <span class="mb-1 block">Fallback provider</span>
+      <select name="fallback_provider" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+        <option value="rules" {% if ai_settings.fallback_provider == "rules" %}selected{% endif %}>rules</option>
+        <option value="ollama" {% if ai_settings.fallback_provider == "ollama" %}selected{% endif %}>ollama</option>
+      </select>
+      <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Used automatically if the active provider fails.</span>
+    </label>
+    <label class="block text-sm md:col-span-2">
+      <span class="mb-1 block">Active model</span>
+      <input type="text" name="active_model" value="{{ ai_settings.active_model }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Choose a model from the registry table below when possible.</span>
+    </label>
+    <div class="md:col-span-2 flex items-center gap-2">
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save AI settings</button>
+    </div>
+  </form>
+
+  <div class="mt-4 flex gap-2">
+    <form method="post" action="/admin/settings/ai/refresh">
+      <button class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Refresh Models</button>
+    </form>
+  </div>
+
+  <div class="mt-6">
+    <h3 class="font-medium mb-2">Model Registry</h3>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-2">Discovered models and current availability status.</p>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <tr>
+            <th class="text-left px-3 py-2">Provider</th>
+            <th class="text-left px-3 py-2">Model</th>
+            <th class="text-left px-3 py-2">Available</th>
+            <th class="text-left px-3 py-2">Enabled</th>
+            <th class="text-left px-3 py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for model in ai_models %}
+          <tr class="border-t border-slate-200 dark:border-slate-800">
+            <td class="px-3 py-2">{{ model.provider_name }}</td>
+            <td class="px-3 py-2">{{ model.model_identifier }}</td>
+            <td class="px-3 py-2">{{ "yes" if model.available else "no" }}</td>
+            <td class="px-3 py-2">{{ "yes" if model.enabled else "no" }}</td>
+            <td class="px-3 py-2">{{ model.health_status }}</td>
+          </tr>
+          {% else %}
+          <tr><td class="px-3 py-3 text-slate-500" colspan="5">No models discovered yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mt-6">
+    <h3 class="font-medium mb-2">Provider Health</h3>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-2">Quick check of each provider's current readiness.</p>
+    <div class="space-y-2">
+      {% for row in ai_health %}
+      <div class="text-sm border border-slate-200 rounded-md px-3 py-2 dark:border-slate-700">
+        <span class="font-medium">{{ row.provider_name }}</span>:
+        <span>{{ "healthy" if row.ok else "unhealthy" }}</span>
+        {% if row.message %}<span class="text-slate-500 dark:text-slate-400"> | {{ row.message }}</span>{% endif %}
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-500">No health data.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="mt-6">
+    <h3 class="font-medium mb-2">Test Current AI Provider</h3>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-2">Run a quick sample classification to verify current settings.</p>
+    <form method="post" action="/admin/settings/ai/test" class="space-y-2">
+      <input type="text" name="test_title" value="Sample task for AI test" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+      <textarea name="test_description" rows="3" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">Classify this task effort.</textarea>
+      <button class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Run AI test</button>
+    </form>
+    {% if ai_test_result %}
+      {% if ai_test_result.ok %}
+        <div class="mt-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/40 dark:bg-emerald-950/30">
+          <p class="font-medium text-emerald-800 dark:text-emerald-200">AI test succeeded.</p>
+          <p class="text-emerald-900 dark:text-emerald-200">Provider: {{ ai_test_result.result.provider_used }}</p>
+          <p class="text-emerald-900 dark:text-emerald-200">Model: {{ ai_test_result.result.model_used }}</p>
+          <p class="text-emerald-900 dark:text-emerald-200">Suggested level: {{ ai_test_result.result.suggested_level }}</p>
+          <p class="text-emerald-900 dark:text-emerald-200">Confidence: {{ ai_test_result.result.confidence }}</p>
+        </div>
+      {% else %}
+        <div class="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm dark:border-red-900/40 dark:bg-red-950/30">
+          <p class="font-medium text-red-800 dark:text-red-200">AI test failed.</p>
+          <p class="text-red-900 dark:text-red-200">{{ ai_test_result.error }}</p>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="mt-6">
+    <h3 class="font-medium mb-2">Recent AI Errors</h3>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-2">Newest errors are shown first. Expand to view older entries.</p>
+    <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
+      {% for err in ai_errors_initial %}
+      <div class="text-sm border border-red-100 bg-red-50 rounded-md px-3 py-2 dark:border-red-900/40 dark:bg-red-950/30">
+        <p class="font-medium text-red-800 dark:text-red-300">{{ err.provider_name }} | {{ err.error_type }}</p>
+        <p class="text-red-900 dark:text-red-200">{{ err.message }}</p>
+        <p class="text-xs text-red-700 dark:text-red-300/80">{{ err.created_at }}</p>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-500 dark:text-slate-400">No recent AI errors.</p>
+      {% endfor %}
+
+      {% if ai_errors_more %}
+      <details class="rounded-md border border-slate-200 p-2 dark:border-slate-700">
+        <summary class="cursor-pointer text-sm text-slate-700 dark:text-slate-300">
+          Show {{ ai_errors_more|length }} older error{{ "s" if ai_errors_more|length != 1 else "" }}
+        </summary>
+        <div class="space-y-2 mt-2">
+          {% for err in ai_errors_more %}
+          <div class="text-sm border border-red-100 bg-red-50 rounded-md px-3 py-2 dark:border-red-900/40 dark:bg-red-950/30">
+            <p class="font-medium text-red-800 dark:text-red-300">{{ err.provider_name }} | {{ err.error_type }}</p>
+            <p class="text-red-900 dark:text-red-200">{{ err.message }}</p>
+            <p class="text-xs text-red-700 dark:text-red-300/80">{{ err.created_at }}</p>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

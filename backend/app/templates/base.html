@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title or "Simple Task Management" }}</title>
+  {% set current_user = user if user is defined and user else none %}
+  {% set accent_color = current_user.accent_color if current_user and current_user.accent_color else "#4f46e5" %}
+  {% set overdue_color = current_user.overdue_color if current_user and current_user.overdue_color else "#dc2626" %}
+  {% set recurring_color = current_user.recurring_color if current_user and current_user.recurring_color else "#0f766e" %}
+  {% set in_progress_color = current_user.in_progress_color if current_user and current_user.in_progress_color else "#d97706" %}
+  {% set unassigned_color = current_user.unassigned_color if current_user and current_user.unassigned_color else "#475569" %}
+  {% set surface_style = current_user.surface_style if current_user and current_user.surface_style else "clean" %}
+  {% set density_preference = current_user.density_preference if current_user and current_user.density_preference else "comfortable" %}
+  {% set decoration_style = current_user.decoration_style if current_user and current_user.decoration_style else "none" %}
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: "class" };
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --app-accent: {{ accent_color }};
+      --app-overdue: {{ overdue_color }};
+      --app-recurring: {{ recurring_color }};
+      --app-in-progress: {{ in_progress_color }};
+      --app-unassigned: {{ unassigned_color }};
+      --app-surface: #ffffff;
+      --app-surface-muted: #f8fafc;
+      --app-border: #e2e8f0;
+      --app-text: #0f172a;
+      --app-muted: #475569;
+    }
+
+    :root.dark {
+      --app-surface: #0f172a;
+      --app-surface-muted: #020617;
+      --app-border: #1e293b;
+      --app-text: #f8fafc;
+      --app-muted: #cbd5e1;
+    }
+
+    body {
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0;
+      transition: opacity 180ms ease;
+    }
+
+    body[data-decoration-style="glow"]::before {
+      opacity: 0.72;
+      background:
+        radial-gradient(circle at 8% 12%, color-mix(in srgb, var(--app-accent) 18%, transparent), transparent 32%),
+        radial-gradient(circle at 88% 18%, color-mix(in srgb, var(--app-recurring) 16%, transparent), transparent 28%),
+        radial-gradient(circle at 18% 88%, color-mix(in srgb, var(--app-overdue) 10%, transparent), transparent 26%);
+    }
+
+    body[data-decoration-style="petals"]::before {
+      opacity: 0.55;
+      background:
+        radial-gradient(ellipse 48px 28px at 12% 18%, color-mix(in srgb, var(--app-accent) 14%, transparent), transparent 70%),
+        radial-gradient(ellipse 58px 34px at 78% 14%, color-mix(in srgb, var(--app-recurring) 12%, transparent), transparent 70%),
+        radial-gradient(ellipse 44px 26px at 22% 82%, color-mix(in srgb, var(--app-accent) 10%, transparent), transparent 70%),
+        radial-gradient(ellipse 52px 30px at 88% 72%, color-mix(in srgb, var(--app-overdue) 8%, transparent), transparent 70%);
+      background-repeat: no-repeat;
+    }
+
+    .app-surface {
+      background: var(--app-surface);
+      border-color: var(--app-border);
+    }
+
+    body[data-surface-style="soft"] .app-surface {
+      background: color-mix(in srgb, var(--app-surface) 92%, var(--app-accent) 8%);
+      box-shadow: 0 10px 35px -28px color-mix(in srgb, var(--app-accent) 35%, transparent);
+    }
+
+    body[data-surface-style="contrast"] .app-surface {
+      border-width: 1.5px;
+      box-shadow: 0 16px 40px -28px rgba(15, 23, 42, 0.35);
+    }
+
+    .app-link {
+      color: var(--app-accent);
+    }
+
+    .app-link:hover {
+      filter: brightness(0.92);
+    }
+
+    .app-primary-button {
+      background: var(--app-accent);
+      color: white;
+      transition: filter 160ms ease, transform 160ms ease;
+    }
+
+    .app-primary-button:hover {
+      filter: brightness(0.95);
+      transform: translateY(-1px);
+    }
+
+    .app-outline-accent {
+      border-color: color-mix(in srgb, var(--app-accent) 40%, var(--app-border));
+      color: var(--app-accent);
+      background: color-mix(in srgb, var(--app-accent) 6%, transparent);
+    }
+
+    .app-outline-accent:hover {
+      background: color-mix(in srgb, var(--app-accent) 10%, transparent);
+    }
+
+    .app-input:focus,
+    .app-select:focus,
+    .app-textarea:focus,
+    .app-color-input:focus {
+      outline: none;
+      border-color: color-mix(in srgb, var(--app-accent) 55%, var(--app-border));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 18%, transparent);
+    }
+
+    .app-status-overdue {
+      border-color: color-mix(in srgb, var(--app-overdue) 35%, var(--app-border));
+      background: color-mix(in srgb, var(--app-overdue) 8%, var(--app-surface));
+    }
+
+    .app-status-unassigned {
+      border-color: color-mix(in srgb, var(--app-unassigned) 32%, var(--app-border));
+      background: color-mix(in srgb, var(--app-unassigned) 7%, var(--app-surface));
+    }
+
+    .app-status-progress {
+      border-color: color-mix(in srgb, var(--app-in-progress) 35%, var(--app-border));
+      background: color-mix(in srgb, var(--app-in-progress) 8%, var(--app-surface));
+    }
+
+    .app-recurring-badge {
+      border: 1px solid color-mix(in srgb, var(--app-recurring) 36%, transparent);
+      background: color-mix(in srgb, var(--app-recurring) 14%, transparent);
+      color: color-mix(in srgb, var(--app-recurring) 70%, var(--app-text));
+    }
+
+    .app-user-accent {
+      color: var(--app-accent);
+    }
+
+    .app-task-highlight {
+      border-left-width: 4px;
+      border-left-color: var(--task-highlight);
+      box-shadow: 0 16px 38px -30px color-mix(in srgb, var(--task-highlight) 46%, transparent);
+    }
+
+    .app-task-highlight .app-task-title {
+      color: color-mix(in srgb, var(--task-highlight) 78%, var(--app-text));
+    }
+
+    .app-progress-track {
+      background: color-mix(in srgb, var(--app-accent) 8%, var(--app-surface-muted));
+    }
+
+    .app-progress-fill {
+      background: var(--app-accent);
+    }
+
+    .app-tab-active {
+      background: var(--app-accent);
+      color: white;
+    }
+
+    body[data-density="compact"] .density-panel {
+      padding: 0.85rem !important;
+    }
+
+    body[data-density="compact"] .density-stack {
+      gap: 0.75rem !important;
+    }
+
+    body[data-density="compact"] .density-copy {
+      font-size: 0.8rem;
+    }
+
+    body[data-density="compact"] .density-header {
+      margin-bottom: 1rem !important;
+    }
+  </style>
+  <script>
+    function resolveThemePreference(pref) {
+      if (pref === "system") {
+        return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      return pref === "dark" ? "dark" : "light";
+    }
+
+    function applyThemePreference(pref) {
+      const root = document.documentElement;
+      const resolved = resolveThemePreference(pref);
+      root.classList.toggle("dark", resolved === "dark");
+      root.dataset.themePreference = pref;
+    }
+
+    (function initThemePreference() {
+      const pref = "{{ (user.theme_preference if user is defined and user else 'light') or 'light' }}";
+      applyThemePreference(pref);
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function() {
+        const current = document.documentElement.dataset.themePreference || "light";
+        if (current === "system") {
+          applyThemePreference("system");
+        }
+      });
+    })();
+  </script>
+</head>
+<body
+  data-surface-style="{{ surface_style }}"
+  data-density="{{ density_preference }}"
+  data-decoration-style="{{ decoration_style }}"
+  class="h-full min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
+>
+  <main class="relative z-10 max-w-5xl mx-auto px-4 py-6">
+    {% if show_nav is not defined or show_nav %}
+      <nav class="app-surface mb-6 rounded-xl border px-4 py-3 shadow-sm backdrop-blur">
+        <div class="flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/dashboard">Dashboard</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/tasks">Tasks</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/tasks/new">Create</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/day-view">Day View</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/schedule">My Schedule</a>
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/appearance">Appearance</a>
+          {% if user is defined and user and user.is_admin %}
+          <a class="hover:text-slate-900 dark:hover:text-white" href="/admin">Admin</a>
+          {% endif %}
+          {% if user is defined and user %}
+          <div class="ml-auto flex items-center gap-2">
+            <form method="post" action="/preferences/theme" class="flex items-center gap-2">
+              <label for="theme_preference" class="text-xs text-slate-500 dark:text-slate-400">Theme</label>
+              <select
+                id="theme_preference"
+                name="theme_preference"
+                onchange="applyThemePreference(this.value); this.form.submit();"
+                class="app-select rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <option value="light" {% if (user.theme_preference or "light") == "light" %}selected{% endif %}>Light</option>
+                <option value="dark" {% if user.theme_preference == "dark" %}selected{% endif %}>Dark</option>
+                <option value="system" {% if user.theme_preference == "system" %}selected{% endif %}>System</option>
+              </select>
+            </form>
+            <span class="rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">v2.1</span>
+            <form method="post" action="/logout">
+              <button class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Logout</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </nav>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  {% if user is defined and user %}
+  <button
+    id="assistant-toggle"
+    type="button"
+    class="app-primary-button fixed bottom-5 right-5 z-40 rounded-full px-4 py-3 text-sm font-medium shadow-lg transition"
+  >
+    Ask AI
+  </button>
+
+  <section
+    id="assistant-panel"
+    class="app-surface fixed bottom-20 right-5 z-40 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-2xl border shadow-2xl"
+  >
+    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+      <div>
+        <h2 class="text-sm font-semibold">Task AI</h2>
+        <p class="text-xs text-slate-500 dark:text-slate-400">App-only help. No admin changes.</p>
+      </div>
+      <button
+        id="assistant-close"
+        type="button"
+        class="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+      >
+        Close
+      </button>
+    </div>
+
+    <div id="assistant-messages" class="max-h-96 space-y-3 overflow-y-auto px-4 py-4"></div>
+    <div id="assistant-suggestions" class="flex flex-wrap gap-2 px-4 pb-3"></div>
+
+    <form id="assistant-form" class="border-t border-slate-200 px-4 py-3 dark:border-slate-800">
+      <label for="assistant-input" class="sr-only">Ask the task assistant</label>
+      <div class="flex gap-2">
+        <input
+          id="assistant-input"
+          name="message"
+          type="text"
+          placeholder="Ask about tasks or capacity"
+          class="app-input w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        />
+        <button
+          id="assistant-send"
+          type="submit"
+          class="app-primary-button rounded-md px-3 py-2 text-sm"
+        >
+          Send
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <script>
+    (function initTaskAssistant() {
+      const toggle = document.getElementById("assistant-toggle");
+      const panel = document.getElementById("assistant-panel");
+      const closeButton = document.getElementById("assistant-close");
+      const form = document.getElementById("assistant-form");
+      const input = document.getElementById("assistant-input");
+      const sendButton = document.getElementById("assistant-send");
+      const messages = document.getElementById("assistant-messages");
+      const suggestions = document.getElementById("assistant-suggestions");
+      let recentItems = [];
+      let pendingRequest = false;
+
+      if (!toggle || !panel || !closeButton || !form || !input || !sendButton || !messages || !suggestions) {
+        return;
+      }
+
+      const initialSuggestions = [
+        "List low tasks",
+        "Who has the most capacity left?",
+        "Who has enough capacity for one high task?",
+        "Add me to any low task available",
+      ];
+
+      function appendBubble(role, text) {
+        const bubble = document.createElement("div");
+        bubble.className = role === "user"
+          ? "ml-auto max-w-[85%] rounded-2xl app-primary-button px-3 py-2 text-sm text-white"
+          : "max-w-[90%] rounded-2xl bg-slate-100 px-3 py-2 text-sm text-slate-800 dark:bg-slate-800 dark:text-slate-100";
+        bubble.textContent = text;
+        messages.appendChild(bubble);
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      function setPendingState(isPending) {
+        pendingRequest = isPending;
+        sendButton.disabled = isPending;
+        input.disabled = isPending;
+        sendButton.classList.toggle("opacity-60", isPending);
+        sendButton.classList.toggle("cursor-not-allowed", isPending);
+      }
+
+      function clearSuggestions() {
+        suggestions.replaceChildren();
+      }
+
+      function renderSuggestions(values) {
+        clearSuggestions();
+        values.forEach(function(value) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+          button.textContent = value;
+          button.addEventListener("click", function() {
+            input.value = value;
+            input.focus();
+          });
+          suggestions.appendChild(button);
+        });
+      }
+
+      function appendItem(item) {
+        const card = document.createElement("div");
+        card.className = "rounded-xl border border-slate-200 px-3 py-3 text-sm dark:border-slate-700";
+
+        const title = document.createElement("p");
+        title.className = "font-medium";
+        title.textContent = item.title;
+        card.appendChild(title);
+
+        if (item.meta) {
+          const meta = document.createElement("p");
+          meta.className = "mt-1 text-xs text-slate-500 dark:text-slate-400";
+          meta.textContent = item.meta;
+          card.appendChild(meta);
+        }
+
+        if (item.action && item.action.type === "assign_self") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "mt-3 rounded-md bg-emerald-600 px-3 py-2 text-xs text-white hover:bg-emerald-700";
+          button.textContent = item.action.label;
+          button.addEventListener("click", function() {
+            runAction(item.action);
+          });
+          card.appendChild(button);
+        }
+
+        messages.appendChild(card);
+        messages.scrollTop = messages.scrollHeight;
+      }
+
+      async function requestJson(url, formData) {
+        let response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            body: formData,
+            credentials: "same-origin",
+          });
+        } catch (error) {
+          return { ok: false, payload: { reply: "The assistant request failed. Check your connection and try again." } };
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          if (response.status === 401 || response.status === 403) {
+            return { ok: false, payload: { reply: "Your session may have expired. Reload the page and sign in again if needed." } };
+          }
+          return { ok: false, payload: { reply: "The assistant returned an unexpected response. Reload and try again." } };
+        }
+
+        try {
+          const payload = await response.json();
+          if (!response.ok && !payload.reply) {
+            payload.reply = "The assistant could not complete that request.";
+          }
+          return { ok: response.ok, payload };
+        } catch (error) {
+          return { ok: false, payload: { reply: "The assistant response could not be read. Reload and try again." } };
+        }
+      }
+
+      async function runAction(action) {
+        if (pendingRequest) {
+          return;
+        }
+        const formData = new FormData();
+        formData.append("task_id", String(action.task_id));
+        formData.append("assignment_date", action.assignment_date);
+        setPendingState(true);
+        try {
+          const result = await requestJson("/assistant/actions/assign-self", formData);
+          appendBubble("assistant", result.payload.reply);
+          if (result.ok && result.payload.ok) {
+            window.setTimeout(function() {
+              window.location.reload();
+            }, 700);
+          }
+        } finally {
+          setPendingState(false);
+        }
+      }
+
+      async function sendMessage(message) {
+        if (!message.trim() || pendingRequest) {
+          return;
+        }
+
+        appendBubble("user", message);
+        input.value = "";
+
+        const formData = new FormData();
+        formData.append("message", message);
+        formData.append("context_json", JSON.stringify(recentItems));
+
+        setPendingState(true);
+        try {
+          const result = await requestJson("/assistant/chat", formData);
+          const payload = result.payload;
+          appendBubble("assistant", payload.reply);
+          recentItems = payload.items || [];
+          recentItems.forEach(appendItem);
+          renderSuggestions(payload.suggestions || initialSuggestions);
+        } finally {
+          setPendingState(false);
+        }
+      }
+
+      toggle.addEventListener("click", function() {
+        panel.classList.remove("hidden");
+        input.focus();
+      });
+
+      closeButton.addEventListener("click", function() {
+        panel.classList.add("hidden");
+      });
+
+      form.addEventListener("submit", function(event) {
+        event.preventDefault();
+        sendMessage(input.value);
+      });
+
+      appendBubble("assistant", "Ask me about tasks or capacity in this app. I can also prepare a self-assignment for you to confirm.");
+      renderSuggestions(initialSuggestions);
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

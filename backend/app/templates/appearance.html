@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="density-header mb-6 flex items-start justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-semibold">Appearance</h1>
+    <p class="mt-1 text-slate-500 dark:text-slate-400">
+      These changes are personal to your account. They only affect how the app looks for you.
+    </p>
+  </div>
+  <a href="/dashboard" class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">
+    Back to dashboard
+  </a>
+</header>
+
+{% if form_error %}
+<div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
+  {{ form_error }}
+</div>
+{% endif %}
+
+<div class="grid gap-6 lg:grid-cols-[minmax(0,1.1fr),minmax(18rem,0.9fr)]">
+  <form method="post" action="/appearance" class="density-stack space-y-5">
+    <section class="app-surface density-panel rounded-xl border p-5">
+      <h2 class="font-medium">Theme and Layout</h2>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Keep the base theme readable, then adjust the visual style around it.
+      </p>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <label class="text-sm">
+          <span class="mb-1 block">Theme</span>
+          <select name="theme_preference" class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+            <option value="light" {% if user.theme_preference == "light" %}selected{% endif %}>Light</option>
+            <option value="dark" {% if user.theme_preference == "dark" %}selected{% endif %}>Dark</option>
+            <option value="system" {% if user.theme_preference == "system" %}selected{% endif %}>System</option>
+          </select>
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Surface style</span>
+          <select name="surface_style" class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+            {% for item in surface_style_options %}
+            <option value="{{ item.value }}" {% if user.surface_style == item.value %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Density</span>
+          <select name="density_preference" class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+            {% for item in density_options %}
+            <option value="{{ item.value }}" {% if user.density_preference == item.value %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Decoration</span>
+          <select name="decoration_style" class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+            {% for item in decoration_options %}
+            <option value="{{ item.value }}" {% if user.decoration_style == item.value %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="app-surface density-panel rounded-xl border p-5">
+      <h2 class="font-medium">Colors</h2>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        These are accent colors for your interface. Text stays system-controlled so the app remains easy to read.
+      </p>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <label class="text-sm">
+          <span class="mb-1 block">Main accent</span>
+          <input name="accent_color" type="color" value="{{ user.accent_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Overdue tasks</span>
+          <input name="overdue_color" type="color" value="{{ user.overdue_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Recurring tasks</span>
+          <input name="recurring_color" type="color" value="{{ user.recurring_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">In progress tasks</span>
+          <input name="in_progress_color" type="color" value="{{ user.in_progress_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm md:col-span-2">
+          <span class="mb-1 block">Unassigned tasks</span>
+          <input name="unassigned_color" type="color" value="{{ user.unassigned_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+      </div>
+    </section>
+
+    <section class="app-surface density-panel rounded-xl border p-5">
+      <h2 class="font-medium">Tasks Category Buttons</h2>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Choose whether the category buttons on the Tasks page should match the task state colors or use their own separate palette for your account only.
+      </p>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <label class="text-sm md:col-span-2">
+          <span class="mb-1 block">Button color mode</span>
+          <select id="task_category_button_color_mode" name="task_category_button_color_mode" class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+            {% for item in task_category_button_mode_options %}
+            <option value="{{ item.value }}" {% if user.task_category_button_color_mode == item.value %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <div id="task-category-button-colors" class="mt-4 grid gap-4 md:grid-cols-2 {% if user.task_category_button_color_mode != 'custom' %}hidden{% endif %}">
+        <label class="text-sm">
+          <span class="mb-1 block">Overdue button</span>
+          <input name="task_category_overdue_color" type="color" value="{{ user.task_category_overdue_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Next up button</span>
+          <input name="task_category_up_next_color" type="color" value="{{ user.task_category_up_next_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Later queue button</span>
+          <input name="task_category_later_color" type="color" value="{{ user.task_category_later_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Unassigned button</span>
+          <input name="task_category_unassigned_color" type="color" value="{{ user.task_category_unassigned_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">In progress button</span>
+          <input name="task_category_in_progress_color" type="color" value="{{ user.task_category_in_progress_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        <label class="text-sm">
+          <span class="mb-1 block">Completed button</span>
+          <input name="task_category_completed_color" type="color" value="{{ user.task_category_completed_color }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+      </div>
+    </section>
+
+    <div class="flex items-center gap-3">
+      <button class="app-primary-button rounded-md px-4 py-2 text-sm" type="submit">Save appearance</button>
+      <p class="text-xs text-slate-500 dark:text-slate-400">You can change this anytime without affecting anyone else.</p>
+    </div>
+  </form>
+
+  <aside class="density-stack space-y-5">
+    <section class="app-surface density-panel rounded-xl border p-5">
+      <h2 class="font-medium">Preview</h2>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        The examples below use your current saved settings.
+      </p>
+      <div class="mt-4 space-y-3">
+        <div class="app-surface rounded-xl border p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="font-medium app-user-accent">Today's Workload</p>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Your accent appears on links, buttons, and emphasis.</p>
+            </div>
+            <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-wide">
+              Recurring
+            </span>
+          </div>
+        </div>
+        <div class="app-status-overdue rounded-xl border p-4">
+          <p class="font-medium">Overdue example</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use this color to make urgent work stand out faster.</p>
+        </div>
+        <div class="app-status-progress rounded-xl border p-4">
+          <p class="font-medium">In progress example</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Useful when you want active work to read differently from pending work.</p>
+        </div>
+        <div class="app-status-unassigned rounded-xl border p-4">
+          <p class="font-medium">Unassigned example</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Helps the scheduler spot tasks that still need a person and a day.</p>
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<script>
+  (function () {
+    const modeSelect = document.getElementById('task_category_button_color_mode');
+    const customColors = document.getElementById('task-category-button-colors');
+    if (!modeSelect || !customColors) {
+      return;
+    }
+
+    function syncTaskCategoryColorVisibility() {
+      customColors.classList.toggle('hidden', modeSelect.value !== 'custom');
+    }
+
+    modeSelect.addEventListener('change', syncTaskCategoryColorVisibility);
+    syncTaskCategoryColorVisibility();
+  })();
+</script>
+{% endblock %}

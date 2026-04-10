@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="density-header mb-6 flex items-center justify-between">
+  <div>
+    <h1 class="text-2xl font-semibold">{{ task.title }}</h1>
+    <p class="text-slate-500 dark:text-slate-400">Task details and assignment</p>
+  </div>
+  <div class="flex items-center gap-2">
+    {% if return_to %}
+    <a href="{{ return_to }}" class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Back</a>
+    {% endif %}
+    {% if can_manage_task %}
+    <a href="/tasks/{{ task.id }}/edit{% if encoded_return_to %}?redirect_to={{ encoded_return_to }}{% endif %}" class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Edit</a>
+    {% endif %}
+  </div>
+</header>
+
+<section class="app-surface {% if personal_highlight_color %}app-task-highlight{% endif %} density-panel density-stack rounded-xl border p-5 space-y-3" {% if personal_highlight_color %}style="--task-highlight: {{ personal_highlight_color }};"{% endif %}>
+  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Task summary</h2>
+  <p><span class="text-slate-500">Description:</span> {{ task.description }}</p>
+  <p><span class="text-slate-500">Due date:</span> {{ task.due_date }}</p>
+  <p><span class="text-slate-500">Effort:</span> {{ task.effort_level.value }}</p>
+  <p><span class="text-slate-500">Points:</span> {{ task.points_value }}</p>
+  <p>
+    <span class="text-slate-500">Repeats:</span>
+    {% if task.recurrence_pattern == "weekly" %}
+      <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium">Recurring</span>
+      Every {{ task.recurrence_interval_weeks or 1 }} week{{ "" if (task.recurrence_interval_weeks or 1) == 1 else "s" }}
+      from {{ task.recurrence_anchor_date or task.due_date }}
+      {% if task.recurrence_until %} until {{ task.recurrence_until }}{% endif %}
+      {% if task.recurrence_count_limit %} ({{ task.recurrence_count_limit }} total occurrences){% endif %}
+    {% elif task.recurrence_parent_id %}
+      Completed occurrence from recurring task #{{ task.recurrence_parent_id }}
+    {% else %}
+      Does not repeat
+    {% endif %}
+  </p>
+  {% if task.recurrence_pattern == "weekly" %}
+  <p><span class="text-slate-500">Blocked-date behavior:</span> {{ task.recurrence_blocked_behavior or "skip" }}</p>
+  {% endif %}
+  <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <p><span class="text-slate-500">Status:</span> {{ task.status.value }}</p>
+    {% if can_update_status and not is_history_occurrence %}
+    <form method="post" action="/tasks/{{ task.id }}/status" class="flex items-center gap-2">
+      <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+      <select
+        name="status_value"
+        onchange="this.form.submit()"
+        class="rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+      >
+        {% for item in statuses %}
+        <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+        {% endfor %}
+      </select>
+      <span class="text-xs text-slate-500 dark:text-slate-400">Updates immediately</span>
+    </form>
+    {% elif is_history_occurrence %}
+    <span class="text-xs text-slate-500 dark:text-slate-400">Completed recurring history is read-only.</span>
+    {% endif %}
+  </div>
+  <p>
+    <span class="text-slate-500">Assignee:</span>
+    {% if task.assignee %}
+      {{ task.assignee.full_name }}{% if not task.assignee.show_in_member_lists %} (hidden from member lists){% endif %}
+    {% else %}
+      Unassigned
+    {% endif %}
+  </p>
+  <p><span class="text-slate-500">Assignment date:</span> {{ task.assignment_date or "-" }}</p>
+  <p>
+    <span class="text-slate-500">My highlight:</span>
+    {% if personal_highlight_color %}
+      <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium" style="border-color: {{ personal_highlight_color }}; color: {{ personal_highlight_color }};">{{ personal_highlight_color }}</span>
+    {% else %}
+      None
+    {% endif %}
+  </p>
+  {% if task.recurrence_pattern == "weekly" and recurrence_history %}
+  <hr class="my-3 border-slate-200 dark:border-slate-800">
+  <div>
+    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Completed occurrences</h2>
+    <div class="mt-2 space-y-2">
+      {% for item in recurrence_history %}
+      <div class="rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+        <p>Completed occurrence for {{ item.due_date }}</p>
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          {% if item.assignment_date %}Assigned {{ item.assignment_date }}{% else %}No assignment date{% endif %}
+        </p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <hr class="my-3 border-slate-200 dark:border-slate-800">
+  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">AI effort analysis</h2>
+  <p><span class="text-slate-500">Suggested effort:</span> {{ task.ai_suggested_level.value if task.ai_suggested_level else "-" }}</p>
+  <p><span class="text-slate-500">Confidence:</span> {{ task.ai_confidence or "-" }}</p>
+  <p><span class="text-slate-500">Reason:</span> {{ task.ai_reason or "-" }}</p>
+  <p><span class="text-slate-500">Source:</span>
+    {% if task.fallback_used %}
+    Rules fallback
+    {% else %}
+    {{ task.ai_provider_used or "-" }} / {{ task.ai_model_used or "-" }}
+    {% endif %}
+  </p>
+</section>
+
+<section class="app-surface density-panel mt-5 rounded-xl border p-5">
+  <h2 class="font-medium mb-1">My View For This Task</h2>
+  <p class="mb-3 text-xs text-slate-500 dark:text-slate-400">Use a personal highlight to make this task stand out in your own lists and day view only.</p>
+  <form method="post" action="/tasks/{{ task.id }}/display" class="space-y-4">
+    <input type="hidden" name="redirect_to" value="{{ return_to }}" />
+    <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+      <input type="checkbox" name="use_personal_highlight" value="true" {% if personal_highlight_color %}checked{% endif %} />
+      Highlight this task in my view
+    </label>
+    <label class="block text-sm">
+      <span class="mb-1 block">Highlight color</span>
+      <input type="color" name="personal_highlight_color" value="{{ personal_highlight_default }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+    </label>
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save my task highlight</button>
+  </form>
+</section>
+
+{% if can_manage_task %}
+<section class="app-surface density-panel mt-5 rounded-xl border p-5">
+  <h2 class="font-medium mb-1">Assign Task</h2>
+  <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Assignment is a separate step from task creation.</p>
+  <form method="post" action="/tasks/{{ task.id }}/assign" class="space-y-4">
+    <input type="hidden" name="redirect_to" value="{{ return_to }}" />
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Assignee</label>
+        <select
+          name="assignee_id"
+          id="assignee_id"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          required
+          hx-get="/tasks/{{ task.id }}/assignment-check"
+          hx-trigger="change"
+          hx-include="#assignee_id,#assignment_date,#allow_policy_override"
+          hx-target="#assignment-feedback"
+        >
+          <option value="">Select a user</option>
+          {% for item in all_users %}
+          <option value="{{ item.id }}" {% if assignment_feedback and assignment_feedback.selected_assignee_id == item.id %}selected{% elif task.assignee_id == item.id %}selected{% endif %}>
+            {{ item.full_name }} ({{ item.email }}){% if not item.show_in_member_lists %} - hidden{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Assignment date</label>
+        <input
+          type="date"
+          id="assignment_date"
+          name="assignment_date"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          value="{{ assignment_feedback.selected_assignment_date if assignment_feedback else initial_assignment_date }}"
+          min="{{ today_iso }}"
+          required
+          hx-get="/tasks/{{ task.id }}/assignment-check"
+          hx-trigger="change"
+          hx-include="#assignee_id,#assignment_date,#allow_policy_override"
+          hx-target="#assignment-feedback"
+        />
+      </div>
+    </div>
+
+    {% if user.is_admin or user.id == task.assignee_id or not task.assignee_id %}
+    <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+      <input
+        type="checkbox"
+        id="allow_policy_override"
+        name="allow_policy_override"
+        value="true"
+        {% if assignment_feedback and assignment_feedback.allow_policy_override %}checked{% endif %}
+        hx-get="/tasks/{{ task.id }}/assignment-check"
+        hx-trigger="change"
+        hx-include="#assignee_id,#assignment_date,#allow_policy_override"
+        hx-target="#assignment-feedback"
+      />
+      Force assign on a blocked date
+    </label>
+    <p class="text-xs text-slate-500 dark:text-slate-400">
+      Use this only for exceptions. Admins can force it for anyone. Other users can only force it when assigning the task to themselves.
+    </p>
+    {% endif %}
+
+    <div class="text-sm text-slate-600 dark:text-slate-300">
+      This task uses <span class="font-medium">{{ task.points_value }} points</span> on the selected assignment day.
+    </div>
+    <div id="assignment-feedback">
+      {% include "tasks/partials/assignment_feedback.html" with context %}
+    </div>
+
+    <button class="app-primary-button rounded-md px-4 py-2" type="submit">
+      Save assignment
+    </button>
+  </form>
+  {% if task.assignee_id %}
+  <form method="post" action="/tasks/{{ task.id }}/unassign" class="mt-3">
+    <input type="hidden" name="redirect_to" value="{{ return_to }}" />
+    <button class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Remove assignment</button>
+  </form>
+  {% endif %}
+</section>
+<script>
+  function applySuggestedAssignmentDate(value) {
+    const input = document.getElementById("assignment_date");
+    if (!input) {
+      return;
+    }
+    input.value = value;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.focus();
+  }
+</script>
+{% endif %}
+{% endblock %}

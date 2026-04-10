@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="density-header mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+  <div>
+    <h1 class="text-2xl font-semibold">Tasks</h1>
+    <p class="text-slate-500 dark:text-slate-400">
+      {% if scope == "mine" %}
+        Keep this view personal and focused. Pick one category at a time so the page stays easy to scan.
+      {% else %}
+        Team task view keeps the work organized by one selected category at a time.
+      {% endif %}
+    </p>
+  </div>
+  <div class="flex flex-col items-start gap-3 md:items-end">
+    <div class="flex items-center gap-2">
+      <a
+        href="/tasks?scope=mine&view={{ selected_view }}"
+        class="inline-flex min-w-[7.5rem] items-center justify-center whitespace-nowrap rounded-md px-4 py-2 text-sm {% if scope == 'mine' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+      >
+        Just mine
+      </a>
+      <a
+        href="/tasks?scope=team&view={{ selected_view }}"
+        class="inline-flex min-w-[7.5rem] items-center justify-center whitespace-nowrap rounded-md px-4 py-2 text-sm {% if scope == 'team' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+      >
+        Everyone
+      </a>
+    </div>
+    <a href="/tasks/new" class="app-primary-button rounded-md px-4 py-2">New Task</a>
+  </div>
+</header>
+
+<section class="density-stack mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+  {% for item in task_views %}
+  {% set view_color = "var(--app-accent)" %}
+  {% if user.task_category_button_color_mode == "custom" %}
+    {% if item.key == "overdue" %}
+      {% set view_color = user.task_category_overdue_color %}
+    {% elif item.key == "up_next" %}
+      {% set view_color = user.task_category_up_next_color %}
+    {% elif item.key == "later" %}
+      {% set view_color = user.task_category_later_color %}
+    {% elif item.key == "unassigned" %}
+      {% set view_color = user.task_category_unassigned_color %}
+    {% elif item.key == "in_progress" %}
+      {% set view_color = user.task_category_in_progress_color %}
+    {% elif item.key == "completed" %}
+      {% set view_color = user.task_category_completed_color %}
+    {% endif %}
+  {% else %}
+    {% if item.key == "overdue" %}
+      {% set view_color = "var(--app-overdue)" %}
+    {% elif item.key == "later" %}
+      {% set view_color = "var(--app-recurring)" %}
+    {% elif item.key == "unassigned" %}
+      {% set view_color = "var(--app-unassigned)" %}
+    {% elif item.key == "in_progress" %}
+      {% set view_color = "var(--app-in-progress)" %}
+    {% elif item.key == "completed" %}
+      {% set view_color = "color-mix(in srgb, var(--app-text) 45%, var(--app-border))" %}
+    {% endif %}
+  {% endif %}
+  <a
+    href="/tasks?scope={{ scope }}&view={{ item.key }}"
+    class="density-panel rounded-xl border p-4 transition duration-200 hover:-translate-y-0.5 {% if selected_view == item.key %}shadow-lg{% endif %}"
+    style="
+      border-color: color-mix(in srgb, {{ view_color }} 35%, var(--app-border));
+      background: {% if selected_view == item.key %}color-mix(in srgb, {{ view_color }} 20%, var(--app-surface)){% else %}color-mix(in srgb, {{ view_color }} 7%, var(--app-surface)){% endif %};
+      box-shadow: {% if selected_view == item.key %}0 18px 40px -30px color-mix(in srgb, {{ view_color }} 52%, transparent), inset 0 0 0 2px color-mix(in srgb, {{ view_color }} 38%, transparent){% else %}0 12px 30px -32px color-mix(in srgb, {{ view_color }} 28%, transparent){% endif %};
+    "
+  >
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <p class="text-xs uppercase tracking-wide" style="color: color-mix(in srgb, {{ view_color }} 78%, var(--app-text));">{{ item.label }}</p>
+        <p class="mt-1 text-2xl font-semibold">{{ item.count }}</p>
+      </div>
+      <span
+        class="rounded-full px-2.5 py-1 text-xs font-medium"
+        style="
+          border: 1px solid color-mix(in srgb, {{ view_color }} 40%, var(--app-border));
+          background: {% if selected_view == item.key %}color-mix(in srgb, {{ view_color }} 22%, transparent){% else %}color-mix(in srgb, {{ view_color }} 10%, transparent){% endif %};
+          color: color-mix(in srgb, {{ view_color }} 82%, var(--app-text));
+        "
+      >
+        {% if selected_view == item.key %}Selected{% else %}Open{% endif %}
+      </span>
+    </div>
+  </a>
+  {% endfor %}
+</section>
+
+{% macro task_card(task, statuses, user, current_page_url) %}
+{% set card_state_class = "app-surface" %}
+{% if task.status.value == "completed" and task.recurrence_parent_id %}
+  {% set card_state_class = "app-surface" %}
+{% elif task.due_date < today and task.status.value != "completed" %}
+  {% set card_state_class = "app-status-overdue" %}
+{% elif task.status.value == "in_progress" %}
+  {% set card_state_class = "app-status-progress" %}
+{% elif task.assignee_id is none %}
+  {% set card_state_class = "app-status-unassigned" %}
+{% endif %}
+<article
+  class="{{ card_state_class }} {% if task.personal_highlight_color %}app-task-highlight{% endif %} density-panel rounded-xl border p-4"
+  {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}
+>
+  <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        <a class="app-link app-task-title text-base font-medium hover:underline" href="/tasks/{{ task.id }}?return_to={{ current_page_return_to }}">{{ task.title }}</a>
+        {% if task.recurrence_pattern == "weekly" %}
+        <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">Recurring</span>
+        {% endif %}
+        {% if task.personal_highlight_color %}
+        <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-700 dark:text-slate-200" style="border-color: {{ task.personal_highlight_color }}; color: {{ task.personal_highlight_color }};">My highlight</span>
+        {% endif %}
+      </div>
+      <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        Due {{ task.due_date }} | {{ task.effort_level.value|upper }} | {{ task.points_value }} pts
+      </p>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+        {% if task.assignee_id %}
+        <span class="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">
+          Assigned to {% if task.assignee_id == user.id %}you{% else %}{{ task.assignee.full_name }}{% endif %}
+        </span>
+        {% if task.assignment_date %}
+        <span class="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">
+          Planned for {{ task.assignment_date }}
+        </span>
+        {% endif %}
+        {% else %}
+        <span class="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">Unassigned</span>
+        {% endif %}
+        {% if task.recurrence_pattern == "weekly" %}
+        <span>Repeats weekly</span>
+        {% elif task.recurrence_parent_id %}
+        <span>Completed recurring occurrence</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      {% if user.is_admin or task.assignee_id == user.id %}
+      <form method="post" action="/tasks/{{ task.id }}/status">
+        <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+        <select
+          name="status_value"
+          onchange="this.form.submit()"
+          class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+        >
+          {% for item in statuses %}
+          <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% else %}
+      <span class="text-xs text-slate-600 dark:text-slate-300">{{ task.status.value }}</span>
+      {% endif %}
+    </div>
+  </div>
+</article>
+{% endmacro %}
+
+{% macro task_scroll_list(items, statuses, user, current_page_url, empty_message) %}
+  {% if items %}
+  <div class="max-h-[29rem] space-y-3 overflow-y-auto pr-1">
+    {% for task in items %}
+      {{ task_card(task, statuses, user, current_page_url) }}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+    {{ empty_message }}
+  </div>
+  {% endif %}
+{% endmacro %}
+
+<section class="app-surface density-panel rounded-xl border p-5">
+  <div class="mb-4 flex items-start justify-between gap-3">
+    <div>
+      <h2 class="font-medium">{{ selected_bucket["label"] }}</h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400">{{ selected_bucket["description"] }}</p>
+    </div>
+    <span class="rounded-full border border-slate-300 px-2 py-1 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+      {{ selected_bucket["items"]|length }} item{{ "" if selected_bucket["items"]|length == 1 else "s" }}
+    </span>
+  </div>
+  {{ task_scroll_list(selected_bucket["items"], statuses, user, current_page_url, selected_bucket["empty_message"]) }}
+</section>
+{% endblock %}
