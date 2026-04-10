@@ -49,7 +49,7 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.1
+## ✨What is new in v2.1
 
 - Mobile companion app for self-hosted Homeflow servers
 - Android app included in this repo under `mobile/app`
