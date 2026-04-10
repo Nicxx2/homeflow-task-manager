@@ -12,6 +12,8 @@ It is designed to help people plan work realistically instead of just stacking t
 
 Version 2 expands the original workload-focused idea with smarter assignment, better recurring tasks, cleaner views, and personal UI customization for each user.
 
+Version 2.1 keeps that same foundation and adds a mobile companion app plus a cleaner day-to-day workflow on the web app.
+
 ---
 
 ## Why this exists
@@ -46,6 +48,22 @@ If someone is away or has blocked days
 
 ---
 
+## What is new in v2.1
+
+- Mobile companion app for self-hosted Homeflow servers
+- Android app included in this repo under `mobile/app`
+- Mobile sign-in, today view, upcoming view, task status updates, offline cache, and sync status handling
+- Mobile secure saved login so users stay signed in until logout
+- Mobile theme mode with remembered preference
+- Simpler dashboard focused on what matters most
+- Interactive dashboard panels for `Unassigned` and `My active tasks`
+- Cleaner Tasks page with one active category view instead of showing everything at once
+- Better `Just mine` and `Everyone` workflow
+- Better return flow after editing tasks so users go back to the task view they were already using
+- Per-user task category button appearance controls
+
+---
+
 ## Key features
 
 - Create tasks first, assign later
@@ -62,6 +80,7 @@ If someone is away or has blocked days
 - Recurring task support with cleaner rollover logic
 - Personal appearance and task highlighting
 - Clean and simple UI
+- Mobile companion app for Android
 
 ---
 
@@ -114,6 +133,7 @@ Users can customize:
 - density and surface style
 - subtle decorative style
 - personal highlight colors for specific tasks
+- task category button colors on the Tasks page
 
 These changes are personal only. One user's customization does not change how the app looks for other users.
 
@@ -143,6 +163,39 @@ The app includes a small built-in AI chat for app-specific help.
 - Add me to a low task available
 
 The assistant is bounded to app-related actions only and uses explicit confirmation for self-assignment actions.
+
+---
+
+## Mobile companion app
+
+Version 2.1 includes a mobile companion app for users running their own Homeflow server.
+
+The mobile app is not a shared cloud product. Each user connects it to their own self-hosted Homeflow backend.
+
+Current mobile scope:
+
+- secure sign-in to the user's own server
+- today's tasks first
+- upcoming assigned tasks
+- task detail and fast status changes
+- rolling offline cache window
+- clear sync, stale-cache, and auth-required states
+- Android support in this repo
+
+The mobile project is included here:
+
+- `mobile/app/`
+- `mobile/docs/`
+
+Typical Android development commands:
+
+```bash
+cd mobile/app
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --debug
+```
 
 ---
 
@@ -284,6 +337,7 @@ On first run:
 - Ollama for local AI
 - Automatic model download
 - Persistent storage for app data and models
+- Flutter Android/mobile companion app source in this repo
 
 ---
 
@@ -294,6 +348,7 @@ On first run:
 - Small teams
 - People who want realistic workload planning
 - Developers who want a clean FastAPI project
+- Self-hosters who want both web and mobile access
 
 ---
 
@@ -305,12 +360,13 @@ On first run:
 - Tailwind CSS
 - Ollama
 - Docker Compose
+- Flutter
 
 ---
 
 ## Version
 
-**v2**
+**v2.1**
 
 Focused on:
 
@@ -319,6 +375,8 @@ Focused on:
 - cleaner recurring tasks
 - clearer dashboard and task views
 - per-user customization without affecting others
+- a self-hosted mobile companion app
+- simpler day-to-day workflow across web and Android
 
 ---
 
@@ -333,3 +391,4 @@ It is a practical system to help you:
 - stay consistent day by day
 - handle recurring responsibilities cleanly
 - keep the app personal without making it cluttered
+- use the same self-hosted system on the web and on Android
