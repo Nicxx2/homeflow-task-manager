@@ -1,26 +1,56 @@
 ## Homeflow Mobile App
 
-This directory now contains the Flutter app implementation for the Homeflow mobile companion through Phase 5.
+This directory contains the Flutter mobile companion app for Homeflow.
 
-Included in this phase:
+Current implementation includes:
 
-- Flutter package manifest and lint config
-- app bootstrap and route shell
-- connection, auth, sync, and cache architecture
-- local and secure storage abstractions
-- V1 screens for login, today, upcoming, task detail, and settings
-- offline/stale/auth-required sync messaging
-- exported read-only widget snapshot state derived from the cached Today view
+- connection and login flow for self-hosted Homeflow servers
+- secure session storage and saved login support
+- today, upcoming, task detail, and settings screens
+- local cache and offline sync handling
+- Android widget snapshot support
+- Android project files in `android/`
 
-Current limitation:
+## What You Need
 
-- native platform folders are not generated in this workspace because `flutter create` was not run here
-- the widget's shared data contract is implemented in Flutter, but the actual Android/iPhone widget host code still depends on generating the native platform projects first
+To build the Android app locally, you need:
 
-When you are ready to turn this into a runnable Flutter project with Android and iPhone platform folders, run:
+- Flutter SDK
+- Android SDK / Android Studio
+- a running Homeflow backend from this repo or another compatible Homeflow server
+
+## Build And Test Locally
+
+From this directory run:
 
 ```bash
-flutter create --platforms=android,ios .
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --debug
 ```
 
-Then keep the generated native folders and preserve the existing `lib/` code from this repo.
+The debug APK output is:
+
+```text
+build/app/outputs/flutter-apk/app-debug.apk
+```
+
+## Running Against Homeflow
+
+The mobile app is designed to connect to the Homeflow backend from this repository.
+
+Typical workflow:
+
+1. start the backend with Docker Compose from the repo root
+2. find the server machine's local IP address
+3. install the APK on an Android device
+4. in the app, enter the server host, port, email, and password
+
+If you are testing from a phone on the same local network, use the computer's LAN IP, not `localhost`.
+
+## iPhone / iOS Note
+
+Android support is already included here.
+
+If you later want to complete iPhone support, that still needs the usual Flutter iOS setup on macOS with Xcode.

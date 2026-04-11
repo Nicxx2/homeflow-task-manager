@@ -1,12 +1,28 @@
 ## Mobile Area
 
-This directory holds the mobile companion app work for Homeflow.
+This directory holds the Homeflow mobile companion app and its supporting docs.
 
-The mobile app is intended to be a lightweight Android/iPhone client for users who run their own self-hosted Homeflow server.
+The mobile app is for users who run their own self-hosted Homeflow server. It is not a shared hosted backend.
 
-Initial contents:
+Current structure:
 
-- `app/` for the future mobile application codebase
-- `docs/` for product, API, offline sync, widget, implementation, and phased delivery notes
+- `app/` Flutter mobile app source
+- `docs/` product, API, offline sync, widget, implementation, and delivery notes
 
-Start with the docs in `docs/` before choosing the app framework and implementation details.
+Recommended reading order:
+
+1. `docs/product-brief.md`
+2. `docs/implementation-spec.md`
+3. `app/README.md`
+
+Current mobile scope:
+
+- secure sign-in to the user's own server
+- today-first task workflow
+- upcoming task view
+- task detail and status changes
+- rolling offline cache window
+- sync, offline, and stale-cache messaging
+- Android support included in this repo
+
+To build the Android app locally, go to `app/` and follow the commands in `app/README.md`.
