@@ -49,7 +49,28 @@ If someone is away or has blocked days
 
 ---
 
-## ✨What is new in v2.1
+## ✨What is new in v2.2
+
+- Improved the task detail view with a cleaner, more minimal layout.
+- Kept the task title and description visible first for faster reading.
+- Moved extra task information into expandable sections to reduce clutter.
+- Kept assignment controls visible for quicker task management.
+- Added a safer delete flow with a themed confirmation popup.
+- Limited task deletion to the task creator or admins only.
+- Added clear delete guidance so users know who to contact for removal.
+- Improved recurring task deletion options:
+  - Delete just this occurrence.
+  - Delete the whole recurring task.
+- Preserved completed recurring history when removing future recurrence.
+- Improved assignment date handling:
+  - Defaults to today for first-time assignment.
+  - Keeps the saved assignment date for already assigned tasks.
+  - Supports due date and next available day shortcuts.
+- Updated visible wording from `color` to `colour`.
+
+---
+
+## v2.1
 
 - Mobile companion app for self-hosted Homeflow servers
 - Android app included in this repo under `mobile/app`
@@ -376,22 +397,6 @@ On first run:
 - Ollama
 - Docker Compose
 - Flutter
-
----
-
-## Version
-
-**v2.1**
-
-Focused on:
-
-- realistic workload planning
-- smarter scheduling
-- cleaner recurring tasks
-- clearer dashboard and task views
-- per-user customization without affecting others
-- a self-hosted mobile companion app
-- simpler day-to-day workflow across web and Android
 
 ---
 
