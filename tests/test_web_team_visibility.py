@@ -362,6 +362,123 @@ def test_assignment_feedback_shows_suggested_date_action():
         db.close()
 
 
+def test_task_detail_defaults_assignment_date_to_today_for_unassigned_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"detail-default-date-{token}@example.com",
+            full_name="Detail Default Date",
+            capacity=8,
+        )
+        due_day = date.today() + timedelta(days=9)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Default Date Task {token}",
+                description="Check task detail default date",
+                due_date=due_day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}")
+
+        assert response.status_code == 200
+        assert f'id="assignment_date"' in response.text
+        assert f'value="{date.today().isoformat()}"' in response.text
+    finally:
+        db.close()
+
+
+def test_task_detail_uses_existing_assignment_date_when_task_is_already_assigned():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"detail-assigned-default-date-{token}@example.com",
+            full_name="Detail Assigned Default Date",
+            capacity=8,
+        )
+        assigned_day = date.today() + timedelta(days=6)
+        task = _create_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Assigned Default Date Task {token}",
+            day=assigned_day,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}")
+
+        assert response.status_code == 200
+        assert f'id="assignment_date"' in response.text
+        assert f'value="{assigned_day.isoformat()}"' in response.text
+    finally:
+        db.close()
+
+
+def test_assignment_next_available_shortcut_starts_from_tomorrow():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"next-available-shortcut-{token}@example.com",
+            full_name="Next Available Shortcut",
+            capacity=10,
+        )
+        SchedulingService(db).update_preferences(
+            user_id=viewer.id,
+            allowed_days={
+                "monday": True,
+                "tuesday": True,
+                "wednesday": True,
+                "thursday": True,
+                "friday": True,
+                "saturday": True,
+                "sunday": True,
+            },
+        )
+        due_day = date.today() + timedelta(days=3)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Shortcut Task {token}",
+                description="Check next available shortcut",
+                due_date=due_day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            viewer,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}/assignment-next-available?assignee_id={viewer.id}")
+
+        assert response.status_code == 200
+        assert response.json()["assignment_date"] == (date.today() + timedelta(days=1)).isoformat()
+    finally:
+        db.close()
+
+
 def test_assignment_in_past_is_blocked_in_web_flow():
     db = SessionLocal()
     try:
@@ -400,6 +517,290 @@ def test_assignment_in_past_is_blocked_in_web_flow():
 
         assert response.status_code == 400
         assert "Assignment date cannot be in the past." in response.text
+    finally:
+        db.close()
+
+
+def test_delete_controls_only_show_for_creator_and_admin():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(
+            db,
+            email=f"delete-creator-{token}@example.com",
+            full_name="Delete Creator",
+            capacity=10,
+        )
+        admin = _create_user(
+            db,
+            email=f"delete-admin-{token}@example.com",
+            full_name="Delete Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+        outsider = _create_user(
+            db,
+            email=f"delete-outsider-{token}@example.com",
+            full_name="Delete Outsider",
+            capacity=10,
+        )
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Delete Control Task {token}",
+                description="Delete controls",
+                due_date=date.today() + timedelta(days=2),
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            creator,
+        )
+
+        creator_response = _authed_client(creator).get(f"/tasks/{task.id}")
+        admin_response = _authed_client(admin).get(f"/tasks/{task.id}")
+        outsider_response = _authed_client(outsider).get(f"/tasks/{task.id}")
+
+        assert creator_response.status_code == 200
+        assert admin_response.status_code == 200
+        assert outsider_response.status_code == 200
+        assert 'onclick="openDeleteTaskModal()"' in creator_response.text
+        assert 'onclick="openDeleteTaskModal()"' in outsider_response.text
+        assert f'action="/tasks/{task.id}/delete"' in creator_response.text
+        assert f'action="/tasks/{task.id}/delete"' in admin_response.text
+        assert f'action="/tasks/{task.id}/delete"' not in outsider_response.text
+        assert "Only the task creator and admins can delete this task." in outsider_response.text
+    finally:
+        db.close()
+
+
+def test_non_creator_non_admin_cannot_delete_task():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(
+            db,
+            email=f"delete-owner-{token}@example.com",
+            full_name="Delete Owner",
+            capacity=10,
+        )
+        outsider = _create_user(
+            db,
+            email=f"delete-blocked-{token}@example.com",
+            full_name="Delete Blocked",
+            capacity=10,
+        )
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Delete Block Task {token}",
+                description="Delete permissions",
+                due_date=date.today() + timedelta(days=2),
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+            ),
+            creator,
+        )
+
+        response = _authed_client(outsider).post(
+            f"/tasks/{task.id}/delete",
+            data={"redirect_to": "/tasks"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 403
+        assert db.get(Task, task.id) is not None
+    finally:
+        db.close()
+
+
+def test_creator_can_delete_recurring_task_and_history_snapshots():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(
+            db,
+            email=f"delete-recurring-{token}@example.com",
+            full_name="Delete Recurring",
+            capacity=10,
+        )
+        due_day = date.today() + timedelta(days=1)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Recurring Delete Task {token}",
+                description="Recurring delete coverage",
+                due_date=due_day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_until=None,
+                recurrence_count_limit=None,
+                recurrence_blocked_behavior="skip",
+            ),
+            creator,
+        )
+        TaskService(db).assign_task(task, assignee_id=creator.id, assignment_date=due_day)
+        TaskService(db).update_status(task, TaskStatus.COMPLETED)
+
+        history_count = db.query(Task).filter(Task.recurrence_parent_id == task.id).count()
+        assert history_count == 1
+
+        response = _authed_client(creator).post(
+            f"/tasks/{task.id}/delete",
+            data={"redirect_to": "/tasks", "delete_scope": "series"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/tasks"
+        assert db.get(Task, task.id) is None
+        preserved_history = (
+            db.query(Task)
+            .filter(
+                Task.title == f"Recurring Delete Task {token}",
+                Task.status == TaskStatus.COMPLETED,
+                Task.due_date == due_day,
+            )
+            .all()
+        )
+        assert len(preserved_history) == 1
+        assert preserved_history[0].recurrence_parent_id is None
+    finally:
+        db.close()
+
+
+def test_creator_can_delete_only_current_recurring_occurrence_and_keep_series():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(
+            db,
+            email=f"delete-recurring-single-{token}@example.com",
+            full_name="Delete Recurring Single",
+            capacity=10,
+        )
+        due_day = date.today() + timedelta(days=1)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Recurring Single Delete Task {token}",
+                description="Delete one recurring occurrence",
+                due_date=due_day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_until=None,
+                recurrence_count_limit=None,
+                recurrence_blocked_behavior="skip",
+            ),
+            creator,
+        )
+        TaskService(db).assign_task(task, assignee_id=creator.id, assignment_date=due_day)
+        original_id = task.id
+
+        response = _authed_client(creator).post(
+            f"/tasks/{task.id}/delete",
+            data={"redirect_to": "/tasks", "delete_scope": "single"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/tasks"
+
+        updated_task = db.get(Task, original_id)
+        assert updated_task is not None
+        assert updated_task.due_date == due_day + timedelta(weeks=1)
+        assert updated_task.assignment_date == due_day + timedelta(weeks=1)
+        assert updated_task.assignee_id == creator.id
+        assert db.query(Task).filter(Task.recurrence_parent_id == original_id).count() == 0
+    finally:
+        db.close()
+
+
+def test_creator_can_delete_final_recurring_occurrence_and_keep_completed_history():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(
+            db,
+            email=f"delete-recurring-final-{token}@example.com",
+            full_name="Delete Recurring Final",
+            capacity=10,
+        )
+        due_day = date.today() + timedelta(days=1)
+        task = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Recurring Final Delete Task {token}",
+                description="Delete final recurring occurrence",
+                due_date=due_day,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_until=None,
+                recurrence_count_limit=2,
+                recurrence_blocked_behavior="skip",
+            ),
+            creator,
+        )
+        TaskService(db).assign_task(task, assignee_id=creator.id, assignment_date=due_day)
+        TaskService(db).update_status(task, TaskStatus.COMPLETED)
+        root_id = task.id
+
+        db.refresh(task)
+        assert task.due_date == due_day + timedelta(weeks=1)
+        assert db.query(Task).filter(Task.recurrence_parent_id == root_id).count() == 1
+
+        response = _authed_client(creator).post(
+            f"/tasks/{task.id}/delete",
+            data={"redirect_to": "/tasks", "delete_scope": "single"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/tasks"
+        assert db.get(Task, root_id) is None
+
+        preserved_history = (
+            db.query(Task)
+            .filter(
+                Task.title == f"Recurring Final Delete Task {token}",
+                Task.status == TaskStatus.COMPLETED,
+                Task.due_date == due_day,
+            )
+            .all()
+        )
+        assert len(preserved_history) == 1
+        assert preserved_history[0].recurrence_parent_id is None
     finally:
         db.close()
 

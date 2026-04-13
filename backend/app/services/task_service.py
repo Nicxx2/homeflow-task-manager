@@ -7,6 +7,7 @@ from backend.app.models.enums import EffortLevel, TaskStatus
 from backend.app.models.task import Task
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user import User
+from backend.app.models.user_task_display_preference import UserTaskDisplayPreference
 from backend.app.schemas.task import TaskCreate, TaskUpdate
 from backend.app.services.recurring_task_service import RecurringTaskService
 from backend.app.services.workload_service import WorkloadService
@@ -166,6 +167,30 @@ class TaskService:
         self.db.commit()
         self.db.refresh(task)
         return task
+
+    def delete_task(self, task: Task, *, preserve_completed_history: bool = False) -> None:
+        related_history = list(self.db.scalars(select(Task).where(Task.recurrence_parent_id == task.id)).all())
+        history_to_delete = [] if preserve_completed_history else related_history
+        cleanup_task_ids = [task.id, *[item.id for item in history_to_delete]]
+
+        related_preferences = list(
+            self.db.scalars(
+                select(UserTaskDisplayPreference).where(UserTaskDisplayPreference.task_id.in_(cleanup_task_ids))
+            ).all()
+        )
+        for preference in related_preferences:
+            self.db.delete(preference)
+
+        if preserve_completed_history:
+            for history_item in related_history:
+                history_item.recurrence_parent_id = None
+                self.db.add(history_item)
+
+        for history_item in history_to_delete:
+            self.db.delete(history_item)
+
+        self.db.delete(task)
+        self.db.commit()
 
     def assign_task_with_validation(
         self,

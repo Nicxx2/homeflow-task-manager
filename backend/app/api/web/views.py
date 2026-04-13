@@ -42,6 +42,10 @@ def _can_manage_task(*, viewer: User, task) -> bool:
     return viewer.is_admin or viewer.is_active
 
 
+def _can_delete_task(*, viewer: User, task) -> bool:
+    return viewer.is_admin or task.created_by_id == viewer.id
+
+
 def _can_update_task_status(*, viewer: User, task) -> bool:
     return not _is_history_occurrence(task) and (viewer.is_admin or task.assignee_id == viewer.id)
 
@@ -156,8 +160,8 @@ def _appearance_page_context(*, request: Request, user: User, form_error: str | 
         "user": user,
         "form_error": form_error,
         "task_category_button_mode_options": [
-            {"value": "match", "label": "Match task colors"},
-            {"value": "custom", "label": "Use separate button colors"},
+            {"value": "match", "label": "Match task colours"},
+            {"value": "custom", "label": "Use separate button colours"},
         ],
         "surface_style_options": [
             {"value": "clean", "label": "Clean"},
@@ -177,8 +181,103 @@ def _appearance_page_context(*, request: Request, user: User, form_error: str | 
 
 
 def _initial_assignment_date_for_task(task) -> str:
-    candidate = task.assignment_date or task.due_date
-    return max(candidate, date.today()).isoformat()
+    return (task.assignment_date or date.today()).isoformat()
+
+
+def _task_delete_contacts(db: Session, *, task) -> dict:
+    admin_contacts = list(
+        db.query(User)
+        .filter(
+            User.is_admin.is_(True),
+            User.is_active.is_(True),
+            User.approval_status == AuthService.APPROVAL_APPROVED,
+            User.id != task.created_by_id,
+        )
+        .order_by(User.full_name.asc())
+        .limit(2)
+        .all()
+    )
+    return {"creator": task.created_by, "admins": admin_contacts}
+
+
+def _task_detail_context(
+    *,
+    request: Request,
+    user: User,
+    db: Session,
+    task: Task,
+    return_to: str | None,
+    assignment_feedback: dict | None,
+) -> dict:
+    _apply_personal_task_highlights(db=db, user=user, tasks=[task])
+    is_history_occurrence = _is_history_occurrence(task)
+    recurrence_history = []
+    if task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None:
+        recurrence_history = RecurringTaskService(db).get_history(task.id)
+    delete_contacts = _task_delete_contacts(db, task=task)
+    current_page_url = return_to or _current_path_with_query(request, f"/tasks/{task.id}")
+    return {
+        "request": request,
+        "user": user,
+        "today_iso": date.today().isoformat(),
+        "initial_assignment_date": _initial_assignment_date_for_task(task),
+        "task": task,
+        "recurrence_history": recurrence_history,
+        "all_users": _assignable_users_for_task(db, task),
+        "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
+        "assignment_feedback": assignment_feedback,
+        "current_page_url": current_page_url,
+        "can_manage_task": _can_manage_task(viewer=user, task=task) and not is_history_occurrence,
+        "can_delete_task": _can_delete_task(viewer=user, task=task),
+        "can_update_status": _can_update_task_status(viewer=user, task=task),
+        "is_history_occurrence": is_history_occurrence,
+        "personal_highlight_color": getattr(task, "personal_highlight_color", None),
+        "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
+        "return_to": return_to,
+        "encoded_return_to": _encoded_redirect_target(return_to) if return_to else None,
+        "delete_contact_creator": delete_contacts["creator"],
+        "delete_contact_admins": delete_contacts["admins"],
+        "delete_redirect_to": return_to or "/tasks",
+        "show_due_date_shortcut": task.due_date >= date.today(),
+    }
+
+
+def _next_available_assignment_shortcut(
+    *,
+    db: Session,
+    task: Task,
+    assignee_id: int,
+    allow_policy_override: bool,
+) -> dict:
+    workload = WorkloadService(db)
+    assignee = db.get(User, assignee_id)
+    if not assignee or not assignee.is_active:
+        return {"ok": False, "message": "Choose a valid user first."}
+
+    capacity = workload.get_user_capacity(assignee_id)
+    if capacity is None:
+        return {"ok": False, "message": "No daily capacity is configured for this user."}
+    if task.points_value > capacity:
+        return {
+            "ok": False,
+            "message": "This task is larger than the user's daily capacity, so no future day can fit it.",
+        }
+
+    suggested_date = workload.suggest_next_available_date(
+        user_id=assignee_id,
+        task_points=task.points_value,
+        start_date=date.today() + timedelta(days=1),
+        max_days=30,
+        exclude_task_id=task.id,
+        allow_policy_override=allow_policy_override,
+    )
+    if suggested_date is None:
+        return {"ok": False, "message": "No suitable future day was found in the next 30 days."}
+    return {
+        "ok": True,
+        "assignment_date": suggested_date.isoformat(),
+        "message": f"Next available day found: {suggested_date.isoformat()}",
+    }
 
 
 def _apply_personal_task_highlights(*, db: Session, user: User, tasks: list[Task]) -> None:
@@ -601,7 +700,7 @@ def task_create_submit(
                     "ai_settings": ai_settings,
                     "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
                     "personal_highlight_default": user.accent_color,
-                    "form_error": "Please choose a valid personal task highlight color.",
+                    "form_error": "Please choose a valid personal task highlight colour.",
                 },
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -750,34 +849,16 @@ def task_detail_page(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
     if not _can_access_task_detail(viewer=user, task=task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
-    _apply_personal_task_highlights(db=db, user=user, tasks=[task])
-    is_history_occurrence = _is_history_occurrence(task)
-    all_users = _assignable_users_for_task(db, task)
-    recurrence_history = []
-    if task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None:
-        recurrence_history = RecurringTaskService(db).get_history(task.id)
-    current_page_url = return_to or _current_path_with_query(request, f"/tasks/{task.id}")
     return templates.TemplateResponse(
         "tasks/detail.html",
-        {
-            "request": request,
-            "user": user,
-            "today_iso": date.today().isoformat(),
-            "initial_assignment_date": _initial_assignment_date_for_task(task),
-            "task": task,
-            "recurrence_history": recurrence_history,
-            "all_users": all_users,
-            "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-            "assignment_feedback": None,
-            "current_page_url": current_page_url,
-            "can_manage_task": _can_manage_task(viewer=user, task=task) and not is_history_occurrence,
-            "can_update_status": _can_update_task_status(viewer=user, task=task),
-            "is_history_occurrence": is_history_occurrence,
-            "personal_highlight_color": getattr(task, "personal_highlight_color", None),
-            "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
-            "return_to": return_to,
-            "encoded_return_to": _encoded_redirect_target(return_to) if return_to else None,
-        },
+        _task_detail_context(
+            request=request,
+            user=user,
+            db=db,
+            task=task,
+            return_to=return_to,
+            assignment_feedback=None,
+        ),
     )
 
 
@@ -855,7 +936,7 @@ def task_edit_submit(
                     "task": task,
                     "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
                     "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-                    "form_error": "Please choose a valid personal task highlight color.",
+                    "form_error": "Please choose a valid personal task highlight colour.",
                     "personal_highlight_color": getattr(task, "personal_highlight_color", None),
                     "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
                     "redirect_to": redirect_target,
@@ -989,35 +1070,48 @@ def task_assign_submit(
     if success:
         return _redirect_to_target(request=request, redirect_to=redirect_to, default="/tasks")
 
-    all_users = _assignable_users_for_task(db, task)
     return templates.TemplateResponse(
         "tasks/detail.html",
-        {
-            "request": request,
-            "user": user,
-            "today_iso": date.today().isoformat(),
-            "initial_assignment_date": _initial_assignment_date_for_task(task),
-            "task": task,
-            "all_users": all_users,
-            "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-            "assignment_feedback": {
+        _task_detail_context(
+            request=request,
+            user=user,
+            db=db,
+            task=task,
+            return_to=redirect_to or f"/tasks/{task.id}",
+            assignment_feedback={
                 **validation,
                 "selected_assignee_id": payload.assignee_id,
                 "selected_assignment_date": payload.assignment_date.isoformat(),
                 "allow_policy_override": _can_override_schedule_for_assignment(viewer=user, assignee_id=payload.assignee_id)
                 and allow_policy_override.lower() in {"true", "on", "1", "yes"},
             },
-            "current_page_url": redirect_to or f"/tasks/{task.id}",
-            "can_manage_task": _can_manage_task(viewer=user, task=task),
-            "can_update_status": _can_update_task_status(viewer=user, task=task),
-            "is_history_occurrence": _is_history_occurrence(task),
-            "personal_highlight_color": getattr(task, "personal_highlight_color", None),
-            "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
-            "return_to": redirect_to or f"/tasks/{task.id}",
-            "encoded_return_to": _encoded_redirect_target(redirect_to or f"/tasks/{task.id}"),
-        },
+        ),
         status_code=status.HTTP_400_BAD_REQUEST,
     )
+
+
+@router.post("/tasks/{task_id}/delete")
+def task_delete_submit(
+    task_id: int,
+    request: Request,
+    delete_scope: str = Form("single"),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    service = TaskService(db)
+    task = service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+    if not _can_delete_task(viewer=user, task=task):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+
+    is_recurring_root = task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None
+    if is_recurring_root and delete_scope != "series":
+        RecurringTaskService(db).delete_current_occurrence(task)
+    else:
+        service.delete_task(task, preserve_completed_history=is_recurring_root and delete_scope == "series")
+    return _redirect_to_target(request=request, redirect_to=redirect_to or "/tasks", default="/tasks")
 
 
 @router.post("/tasks/{task_id}/unassign")
@@ -1110,6 +1204,39 @@ def task_assignment_check(
         "tasks/partials/assignment_feedback.html",
         {"request": request, "feedback": feedback, "task": task},
     )
+
+
+@router.get("/tasks/{task_id}/assignment-next-available")
+def task_assignment_next_available(
+    task_id: int,
+    assignee_id: int | None = None,
+    allow_policy_override: str = "false",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    task_service = TaskService(db)
+    task = task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+    if not _can_manage_task(viewer=user, task=task):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+    if not assignee_id:
+        return JSONResponse({"ok": False, "message": "Select a user first."}, status_code=status.HTTP_400_BAD_REQUEST)
+
+    allow_override = _can_override_schedule_for_assignment(viewer=user, assignee_id=assignee_id) and allow_policy_override.lower() in {
+        "true",
+        "on",
+        "1",
+        "yes",
+    }
+    payload = _next_available_assignment_shortcut(
+        db=db,
+        task=task,
+        assignee_id=assignee_id,
+        allow_policy_override=allow_override,
+    )
+    status_code = status.HTTP_200_OK if payload["ok"] else status.HTTP_400_BAD_REQUEST
+    return JSONResponse(payload, status_code=status_code)
 
 
 @router.get("/schedule", response_class=HTMLResponse)

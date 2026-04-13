@@ -62,9 +62,9 @@
     </section>
 
     <section class="app-surface density-panel rounded-xl border p-5">
-      <h2 class="font-medium">Colors</h2>
+      <h2 class="font-medium">Colours</h2>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        These are accent colors for your interface. Text stays system-controlled so the app remains easy to read.
+        These are accent colours for your interface. Text stays system-controlled so the app remains easy to read.
       </p>
       <div class="mt-4 grid gap-4 md:grid-cols-2">
         <label class="text-sm">
@@ -93,11 +93,11 @@
     <section class="app-surface density-panel rounded-xl border p-5">
       <h2 class="font-medium">Tasks Category Buttons</h2>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        Choose whether the category buttons on the Tasks page should match the task state colors or use their own separate palette for your account only.
+        Choose whether the category buttons on the Tasks page should match the task state colours or use their own separate palette for your account only.
       </p>
       <div class="mt-4 grid gap-4 md:grid-cols-2">
         <label class="text-sm md:col-span-2">
-          <span class="mb-1 block">Button color mode</span>
+          <span class="mb-1 block">Button colour mode</span>
           <select id="task_category_button_color_mode" name="task_category_button_color_mode" class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
             {% for item in task_category_button_mode_options %}
             <option value="{{ item.value }}" {% if user.task_category_button_color_mode == item.value %}selected{% endif %}>{{ item.label }}</option>

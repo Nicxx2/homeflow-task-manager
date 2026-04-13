@@ -1,10 +1,11 @@
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models.enums import TaskStatus
 from backend.app.models.task import Task
+from backend.app.models.user_task_display_preference import UserTaskDisplayPreference
 from backend.app.services.workload_service import WorkloadService
 
 
@@ -33,7 +34,7 @@ class RecurringTaskService:
 
     def complete_occurrence(self, root: Task) -> Task:
         self.sync()
-        next_occurrence = self._next_occurrence_after_completion(root)
+        next_occurrence = self._next_occurrence_after_current(root)
         if next_occurrence is None:
             root.status = TaskStatus.COMPLETED
             self.db.add(root)
@@ -51,14 +52,48 @@ class RecurringTaskService:
         self.db.refresh(root)
         return root
 
-    def _completed_occurrence_count(self, root_id: int) -> int:
-        value = self.db.scalar(
-            select(func.count(Task.id)).where(
-                Task.recurrence_parent_id == root_id,
-                Task.status == TaskStatus.COMPLETED,
+    def delete_current_occurrence(self, root: Task) -> Task | None:
+        self.sync()
+        next_occurrence = self._next_occurrence_after_current(root)
+        if next_occurrence is None:
+            history_items = list(
+                self.db.scalars(
+                    select(Task).where(
+                        Task.recurrence_parent_id == root.id,
+                        Task.status == TaskStatus.COMPLETED,
+                    )
+                ).all()
             )
-        )
-        return int(value or 0)
+            for history_item in history_items:
+                history_item.recurrence_parent_id = None
+                self.db.add(history_item)
+
+            display_preferences = list(
+                self.db.scalars(
+                    select(UserTaskDisplayPreference).where(UserTaskDisplayPreference.task_id == root.id)
+                ).all()
+            )
+            for preference in display_preferences:
+                self.db.delete(preference)
+
+            self.db.delete(root)
+            self.db.commit()
+            return None
+
+        root.status = TaskStatus.PENDING
+        root.due_date = next_occurrence["due_date"]
+        root.assignment_date = next_occurrence["assignment_date"]
+        root.assignee_id = next_occurrence["assignee_id"]
+        self.db.add(root)
+        self.db.commit()
+        self.db.refresh(root)
+        return root
+
+    def _current_occurrence_index(self, root: Task) -> int:
+        anchor = root.recurrence_anchor_date or root.due_date
+        interval_days = max((root.recurrence_interval_weeks or 1) * 7, 1)
+        delta_days = max((root.due_date - anchor).days, 0)
+        return delta_days // interval_days
 
     def _resolve_occurrence_date(self, root: Task, scheduled_date: date) -> date | None:
         if root.assignee_id is None:
@@ -79,10 +114,10 @@ class RecurringTaskService:
 
         return None
 
-    def _next_occurrence_after_completion(self, root: Task) -> dict | None:
+    def _next_occurrence_after_current(self, root: Task) -> dict | None:
         anchor = root.recurrence_anchor_date or root.due_date
         interval_weeks = root.recurrence_interval_weeks or 1
-        next_index = self._completed_occurrence_count(root.id) + 1
+        next_index = self._current_occurrence_index(root) + 1
 
         while True:
             if root.recurrence_count_limit and next_index >= root.recurrence_count_limit:
