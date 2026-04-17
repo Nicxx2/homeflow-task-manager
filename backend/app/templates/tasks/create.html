@@ -2,7 +2,7 @@
 {% block content %}
 <header class="density-header mb-6">
   <h1 class="text-2xl font-semibold">Create Task</h1>
-  <p class="text-slate-500 dark:text-slate-400">Create now, assign later. Effort is required before saving.</p>
+  <p class="text-slate-500 dark:text-slate-400">Create quickly, then leave it unassigned or plan it straight away. Effort is required before saving.</p>
   <div class="mt-2">
     <span class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-medium
       {% if ai_ui_status.level == 'green' %}bg-emerald-100 text-emerald-800
@@ -18,7 +18,7 @@
   </p>
 </header>
 
-<form method="post" action="/tasks" class="density-stack max-w-2xl space-y-5" id="task-create-form">
+<form method="post" action="/tasks" class="density-stack max-w-2xl space-y-5" id="task-create-form" data-schedule-form data-schedule-create-flow="true" data-schedule-preview-url="/task-create-assignment-check" data-next-available-url="/task-create-assignment-next-available" onsubmit="return appValidateScheduleForm(this)">
   {% if form_error %}
     <div class="rounded-md bg-red-50 border border-red-100 text-red-700 px-3 py-2 text-sm">{{ form_error }}</div>
   {% endif %}
@@ -28,6 +28,7 @@
       <input
         id="title"
         name="title"
+        value="{{ form_values.title }}"
         class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
         required
         hx-post="/tasks/ai-classify"
@@ -50,12 +51,88 @@
         hx-include="#title,#description"
         hx-target="#ai-panel"
         hx-indicator="#ai-loading"
-      ></textarea>
+      >{{ form_values.description }}</textarea>
     </div>
     <div>
       <label class="block text-sm mb-1">Due date</label>
-      <input type="date" name="due_date" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" min="{{ today }}" required />
+      <input id="task_due_date" type="date" name="due_date" value="{{ form_values.due_date }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" min="{{ today }}" required data-schedule-due-date onchange="appResetScheduleShortcutFeedback(this)" />
     </div>
+    <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if form_values.assignee_id_create %}open{% endif %}>
+      <summary class="cursor-pointer list-none">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-medium">Assign now</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Optional. Keep creation fast, or plan it immediately.</p>
+          </div>
+          <span class="text-xs text-slate-500 dark:text-slate-400">{% if form_values.assignee_id_create %}Planned{% else %}Optional{% endif %}</span>
+        </div>
+      </summary>
+      <div class="mt-3 space-y-3">
+        <label class="block text-sm">
+          <span class="mb-1 block">Assignee</span>
+          <select
+            id="create_assignee_id"
+            name="assignee_id_create"
+            class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+            data-schedule-assignee
+            onchange="appToggleAssignmentSection(this); appRequestSchedulePreview(appFindScheduleForm(this))"
+          >
+            <option value="">Create unassigned</option>
+            {% for item in assignable_users %}
+            <option value="{{ item.id }}" {% if form_values.assignee_id_create == (item.id ~ '') %}selected{% endif %}>
+              {{ item.full_name }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <div data-assignment-section {% if not form_values.assignee_id_create %}class="hidden"{% endif %}>
+          <label class="block text-sm">
+            <span class="mb-1 block">Assignment day</span>
+            <input
+              id="create_assignment_date"
+              type="date"
+              name="assignment_date_create"
+              value="{{ form_values.assignment_date_create }}"
+              min="{{ today }}"
+              class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+              data-schedule-assignment-date
+              data-next-available-default-start="tomorrow"
+              data-user-picked-date="{% if form_values.assignee_id_create and form_values.assignment_date_create %}true{% else %}false{% endif %}"
+              onfocus="appBeginScheduleDateEdit(this)"
+              onclick="appBeginScheduleDateEdit(this)"
+              oninput="this.dataset.userPickedDate='true'; appHandleScheduleDateInteraction(this)"
+              onchange="this.dataset.userPickedDate='true'; appHandleScheduleDateInteraction(this)"
+              oninvalid="appHandleScheduleInvalid(this)"
+            />
+          </label>
+
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              onclick="appApplyScheduleDueDate(this)"
+            >
+              Use due date
+            </button>
+            <button
+              type="button"
+              class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              onclick="appApplyNextAvailableDate(this)"
+            >
+              Next free
+            </button>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" data-schedule-shortcut-feedback data-default-feedback="If this day does not fit, use Next free to jump to the next available day.">
+            If this day does not fit, use Next free to jump to the next available day.
+          </p>
+          <div id="create-assignment-feedback" class="mt-3" data-schedule-feedback>
+            {% set feedback = create_assignment_feedback %}
+            {% include "tasks/partials/assignment_feedback.html" %}
+          </div>
+        </div>
+      </div>
+    </details>
     <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
       <summary class="cursor-pointer list-none">
         <div class="flex items-center justify-between gap-3">
@@ -68,7 +145,7 @@
       </summary>
       <div class="mt-3">
         <label class="flex items-center gap-2 text-sm font-medium">
-          <input type="checkbox" name="use_personal_highlight" value="true" />
+          <input type="checkbox" name="use_personal_highlight" value="true" {% if form_values.use_personal_highlight %}checked{% endif %} />
           Highlight this task in my own view
         </label>
         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -76,11 +153,11 @@
         </p>
         <label class="mt-3 block text-sm">
           <span class="mb-1 block">My task highlight colour</span>
-          <input type="color" name="personal_highlight_color" value="{{ personal_highlight_default }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+          <input type="color" name="personal_highlight_color" value="{{ form_values.personal_highlight_color or personal_highlight_default }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
         </label>
       </div>
     </details>
-    <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+    <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if form_values.repeat_weekly %}open{% endif %}>
       <summary class="cursor-pointer list-none">
         <div class="flex items-center justify-between gap-3">
           <div>
@@ -92,7 +169,7 @@
       </summary>
       <div class="mt-3">
         <label class="flex items-center gap-2 text-sm font-medium">
-          <input type="checkbox" name="repeat_weekly" value="true" />
+          <input type="checkbox" name="repeat_weekly" value="true" {% if form_values.repeat_weekly %}checked{% endif %} />
           Repeat weekly from this due date
         </label>
         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -101,22 +178,22 @@
         <div class="mt-3 grid gap-3 md:grid-cols-3">
           <label class="text-sm">
             <span class="mb-1 block">Every X weeks</span>
-            <input type="number" min="1" name="recurrence_interval_weeks" value="1" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+            <input type="number" min="1" name="recurrence_interval_weeks" value="{{ form_values.recurrence_interval_weeks }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
           </label>
           <label class="text-sm">
             <span class="mb-1 block">End date (optional)</span>
-            <input type="date" name="recurrence_until" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+            <input type="date" name="recurrence_until" value="{{ form_values.recurrence_until }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
           </label>
           <label class="text-sm">
             <span class="mb-1 block">Total occurrences (optional)</span>
-            <input type="number" min="1" name="recurrence_count_limit" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+            <input type="number" min="1" name="recurrence_count_limit" value="{{ form_values.recurrence_count_limit }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
           </label>
         </div>
         <label class="mt-3 block text-sm">
           <span class="mb-1 block">If the scheduled day is blocked</span>
           <select name="recurrence_blocked_behavior" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-            <option value="skip">Skip that occurrence and resume next week</option>
-            <option value="move_same_week">Move to the next allowed day in the same week</option>
+            <option value="skip" {% if form_values.recurrence_blocked_behavior == "skip" %}selected{% endif %}>Skip that occurrence and resume next week</option>
+            <option value="move_same_week" {% if form_values.recurrence_blocked_behavior == "move_same_week" %}selected{% endif %}>Move to the next allowed day in the same week</option>
           </select>
         </label>
       </div>
@@ -125,7 +202,12 @@
 
   <div id="ai-loading" class="htmx-indicator text-sm text-slate-500 dark:text-slate-400">Analysing task...</div>
   <div id="ai-panel" class="app-surface density-panel rounded-xl border p-5">
-    {% include "tasks/partials/ai_waiting.html" %}
+    {% if create_ai_result %}
+      {% set result = create_ai_result %}
+      {% include "tasks/partials/ai_result.html" %}
+    {% else %}
+      {% include "tasks/partials/ai_waiting.html" %}
+    {% endif %}
   </div>
 
   <div class="flex items-center gap-3 pt-1">
@@ -146,6 +228,13 @@
     } else {
       saveBtn.disabled = true;
       saveBtn.className = "bg-slate-300 text-slate-600 px-4 py-2 rounded-md cursor-not-allowed";
+    }
+
+    const createAssignee = document.getElementById("create_assignee_id");
+    const createAssignmentDate = document.getElementById("create_assignment_date");
+    const createFeedback = document.getElementById("create-assignment-feedback");
+    if (createAssignee && createAssignmentDate && createFeedback && createAssignee.value && createAssignmentDate.value && hidden.value) {
+      appRequestSchedulePreview(document.getElementById("task-create-form"));
     }
   }
 </script>

@@ -25,10 +25,6 @@ A task manager for households and small teams.
 
 It is designed to help people plan work realistically instead of just stacking tasks onto a list.
 
-Version 2 expands the original workload-focused idea with smarter assignment, better recurring tasks, cleaner views, and personal UI customization for each user.
-
-Version 2.1 keeps that same foundation and adds a mobile companion app plus a cleaner day-to-day workflow on the web app.
-
 ---
 
 ## Why this exists
@@ -49,179 +45,71 @@ If someone is away or has blocked days
 
 ---
 
-## ✨What is new in v2.2
+## ✨ What is new in v2.3
 
-- Improved the task detail view with a cleaner, more minimal layout.
-- Kept the task title and description visible first for faster reading.
-- Moved extra task information into expandable sections to reduce clutter.
-- Kept assignment controls visible for quicker task management.
-- Added a safer delete flow with a themed confirmation popup.
-- Limited task deletion to the task creator or admins only.
-- Added clear delete guidance so users know who to contact for removal.
-- Improved recurring task deletion options:
-  - Delete just this occurrence.
-  - Delete the whole recurring task.
-- Preserved completed recurring history when removing future recurrence.
-- Improved assignment date handling:
-  - Defaults to today for first-time assignment.
-  - Keeps the saved assignment date for already assigned tasks.
-  - Supports due date and next available day shortcuts.
-- Updated visible wording from `color` to `colour`.
+- Faster scheduling directly from the web Tasks page with a compact calendar action on each task card.
+- Optional assign-on-create flow so a task can be planned immediately without leaving creation.
+- Quick due date and assignment updates from both the Tasks page and Day View with the same minimalist schedule popover.
+- Temporary extra capacity on specific days or short date ranges without changing a member's base admin-set capacity.
+- Better next-available suggestions that now account for temporary extra capacity as well as blocked days and existing workload.
+- Cleaner task detail flow with clearer assignment handling, safer deletion, and preserved recurring-task history where appropriate.
 
 ---
 
-## v2.1
+## What else is in Homeflow
 
-- Mobile companion app for self-hosted Homeflow servers
-- Android app included in this repo under `mobile/app`
-- Mobile sign-in, today view, upcoming view, task status updates, offline cache, and sync status handling
-- Mobile secure saved login so users stay signed in until logout
-- Mobile theme mode with remembered preference
-- Simpler dashboard focused on what matters most
-- Interactive dashboard panels for `Unassigned` and `My active tasks`
-- Cleaner Tasks page with one active category view instead of showing everything at once
-- Better `Just mine` and `Everyone` workflow
-- Better return flow after editing tasks so users go back to the task view they were already using
-- Per-user task category button appearance controls
+### Web app
 
----
+- Effort-based planning with daily workload protection
+- Automatic next-available scheduling suggestions
+- Quick status changes from list and day views
+- Recurring task support with one active occurrence instead of cluttering the task list
+- Admin controls for users, capacity, visibility, and AI settings
+- Personal UI customization without affecting other users
 
-## v2
+### Smart scheduling
 
-- Smarter assignment with automatic next-best-day suggestions
-- User away periods and weekday availability preferences
-- Cleaner recurring tasks with one active recurring task instead of cluttering the list with many future copies
-- Recurring tasks can skip blocked dates or move within the same week, then return to the normal schedule
-- Better overdue handling and task prioritization
-- Cleaner dashboard with expandable sections and stronger focus on today's workload
-- Task list grouped into clearer buckets such as overdue, upcoming, unassigned, in progress, and completed
-- Personal appearance settings for each user
-- Personal task highlighting and custom state colors without affecting other users
+The app is designed to plan around real-life availability, not just due dates.
 
----
+- prevents assignment to past dates
+- avoids blocked weekdays and away periods
+- checks daily capacity before assigning work
+- suggests the next valid day when the chosen one does not fit
+- allows controlled override only when the rules permit it
 
-## Key features
+### Recurring tasks
 
-- Create tasks first, assign later
-- Effort-based planning system
-- Daily workload protection
-- Automatic next-available-day suggestions when a day is overloaded
-- Automatic effort suggestions using local AI
-- Safe fallback rules when AI is unavailable
-- Account registration with admin approval
-- Admin controls for users, visibility, capacity, and AI settings
-- Quick status updates from task lists and day view
-- Built-in app assistant for task and workload queries
-- User away periods and blocked weekdays
-- Recurring task support with cleaner rollover logic
-- Personal appearance and task highlighting
-- Clean and simple UI
-- Mobile companion app for Android
+Recurring tasks stay cleaner than a typical task app.
 
----
+- one active recurring task stays visible
+- completed occurrences move into history
+- the next active occurrence is prepared automatically
+- blocked dates can be skipped or moved within the same week based on the chosen rule
 
-## Smart scheduling
+### Personal customization
 
-Version 2 improves planning so the app can work with real-life availability.
+Each user can personalize their own view without changing the experience for anyone else.
 
-It can now:
-
-- avoid assigning work on days a user has blocked
-- avoid away periods automatically
-- suggest the next valid day with enough capacity
-- prevent assignment to past dates
-- allow controlled force-assign only when logically allowed
-
-This keeps the schedule practical without removing flexibility.
-
----
-
-## Recurring tasks
-
-Recurring tasks are handled in a cleaner way in v2.
-
-Instead of creating many future task copies and cluttering the task list, the app keeps one active recurring task visible.
-
-When it is completed:
-
-- that occurrence is recorded in history
-- the recurring series continues
-- the next active occurrence is prepared
-- blocked dates can be skipped or moved based on the chosen rule
-- future occurrences return to the normal recurring schedule
-
-This keeps recurring tasks predictable without overwhelming the interface.
-
----
-
-## Personal customization
-
-Each user can personalize their own experience without affecting anyone else.
-
-Users can customize:
-
-- theme
-- accent color
-- overdue task color
-- recurring task color
-- unassigned task color
-- in-progress task color
+- theme and accent color
+- state colors such as overdue, recurring, unassigned, and in progress
 - density and surface style
-- subtle decorative style
-- personal highlight colors for specific tasks
-- task category button colors on the Tasks page
+- personal task highlight colors
+- task category button colours on the Tasks page
 
-These changes are personal only. One user's customization does not change how the app looks for other users.
-
----
-
-## AI
+### AI and assistant
 
 - Runs locally with Ollama
 - No external AI API required
-- Works offline after setup
-- Automatically falls back to rules if AI is unavailable
-- Includes an in-app assistant for task and workload help
+- Falls back safely to rules when AI is unavailable
+- Includes a built-in assistant for app-specific workload and task queries
 
----
+### Mobile companion app
 
-## Built-in assistant
+Homeflow also includes an Android companion app for self-hosted servers.
 
-The app includes a small built-in AI chat for app-specific help.
-
-**Examples:**
-
-- List low tasks
-- Show tasks due today
-- Show unassigned tasks due today
-- Show tasks assigned to me today
-- Who has the most capacity left?
-- Add me to a low task available
-
-The assistant is bounded to app-related actions only and uses explicit confirmation for self-assignment actions.
-
----
-
-## Mobile companion app
-
-Version 2.1 includes a mobile companion app for users running their own Homeflow server.
-
-The mobile app is not a shared cloud product. Each user connects it to their own self-hosted Homeflow backend.
-
-Current mobile scope:
-
-- secure sign-in to the user's own server
-- today's tasks first
-- upcoming assigned tasks
-- task detail and fast status changes
-- rolling offline cache window
-- clear sync, stale-cache, and auth-required states
-- Android support in this repo
-
-The mobile project is included here:
-
-- `mobile/app/`
-- `mobile/docs/`
+- mobile source: `mobile/app/`
+- supporting mobile docs: `mobile/docs/`
+- a good starting point for implementation details: `mobile/docs/implementation-spec.md`
 
 Typical Android development commands:
 

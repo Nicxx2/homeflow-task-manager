@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.task import Task
 from backend.app.models.user_daily_capacity import UserDailyCapacity
+from backend.app.models.user_daily_capacity_override import UserDailyCapacityOverride
 from backend.app.services.scheduling_service import SchedulingService
 
 
@@ -30,9 +31,105 @@ class WorkloadService:
         value = self.db.scalar(self._assigned_points_stmt(user_id=user_id, date_value=date_value, exclude_task_id=exclude_task_id))
         return int(value or 0)
 
-    def get_user_capacity(self, user_id: int) -> int | None:
+    def get_base_user_capacity(self, user_id: int) -> int | None:
         capacity = self.db.get(UserDailyCapacity, user_id)
         return capacity.daily_capacity_points if capacity else None
+
+    def get_extra_capacity_points(self, *, user_id: int, date_value: date) -> int:
+        override = self.db.get(UserDailyCapacityOverride, {"user_id": user_id, "override_date": date_value})
+        return override.extra_capacity_points if override else 0
+
+    def get_user_capacity(self, user_id: int, *, date_value: date | None = None) -> int | None:
+        base_capacity = self.get_base_user_capacity(user_id)
+        if base_capacity is None or date_value is None:
+            return base_capacity
+        return base_capacity + self.get_extra_capacity_points(user_id=user_id, date_value=date_value)
+
+    def get_capacity_breakdown(self, *, user_id: int, date_value: date) -> dict[str, int | None]:
+        base_capacity = self.get_base_user_capacity(user_id)
+        extra_capacity = self.get_extra_capacity_points(user_id=user_id, date_value=date_value) if base_capacity is not None else 0
+        total_capacity = None if base_capacity is None else base_capacity + extra_capacity
+        return {
+            "base_capacity": base_capacity,
+            "extra_capacity": extra_capacity,
+            "total_capacity": total_capacity,
+        }
+
+    def set_extra_capacity_points(self, *, user_id: int, date_value: date, extra_capacity_points: int) -> None:
+        base_capacity = self.get_base_user_capacity(user_id)
+        if base_capacity is None:
+            raise ValueError("This user does not have a base daily capacity yet.")
+        if extra_capacity_points < 0:
+            raise ValueError("Extra capacity cannot be negative.")
+
+        existing = self.db.get(UserDailyCapacityOverride, {"user_id": user_id, "override_date": date_value})
+        if extra_capacity_points == 0:
+            if existing:
+                self.db.delete(existing)
+                self.db.commit()
+            return
+
+        if existing:
+            existing.extra_capacity_points = extra_capacity_points
+            self.db.add(existing)
+        else:
+            self.db.add(
+                UserDailyCapacityOverride(
+                    user_id=user_id,
+                    override_date=date_value,
+                    extra_capacity_points=extra_capacity_points,
+                )
+            )
+        self.db.commit()
+
+    def set_extra_capacity_points_range(
+        self,
+        *,
+        user_id: int,
+        start_date: date,
+        end_date: date,
+        extra_capacity_points: int,
+    ) -> None:
+        base_capacity = self.get_base_user_capacity(user_id)
+        if base_capacity is None:
+            raise ValueError("This user does not have a base daily capacity yet.")
+        if extra_capacity_points < 0:
+            raise ValueError("Extra capacity cannot be negative.")
+        if end_date < start_date:
+            raise ValueError("End date must be on or after the start date.")
+
+        existing_rows = {
+            row.override_date: row
+            for row in self.db.scalars(
+                select(UserDailyCapacityOverride).where(
+                    UserDailyCapacityOverride.user_id == user_id,
+                    UserDailyCapacityOverride.override_date >= start_date,
+                    UserDailyCapacityOverride.override_date <= end_date,
+                )
+            ).all()
+        }
+
+        for ordinal in range(start_date.toordinal(), end_date.toordinal() + 1):
+            candidate_date = date.fromordinal(ordinal)
+            existing = existing_rows.get(candidate_date)
+            if extra_capacity_points == 0:
+                if existing:
+                    self.db.delete(existing)
+                continue
+
+            if existing:
+                existing.extra_capacity_points = extra_capacity_points
+                self.db.add(existing)
+            else:
+                self.db.add(
+                    UserDailyCapacityOverride(
+                        user_id=user_id,
+                        override_date=candidate_date,
+                        extra_capacity_points=extra_capacity_points,
+                    )
+                )
+
+        self.db.commit()
 
     def validate_assignment(
         self,
@@ -47,27 +144,28 @@ class WorkloadService:
         is_past_date = date_value < today
         schedule_block = self.scheduling.get_block_for_date(user_id=user_id, date_value=date_value)
         current_points = self.get_daily_points(user_id=user_id, date_value=date_value, exclude_task_id=exclude_task_id)
-        capacity = self.get_user_capacity(user_id)
+        capacity = self.get_user_capacity(user_id, date_value=date_value)
         projected_points = current_points + task_points
-        task_too_large = capacity is not None and task_points > capacity
+        task_too_large = False
         blocked_by_policy = schedule_block is not None and not allow_policy_override
         fits_capacity = capacity is not None and projected_points <= capacity
         fits = fits_capacity and not blocked_by_policy and not is_past_date
 
         suggestion = None
-        if not fits and capacity is not None and not task_too_large and not allow_policy_override:
+        suggestion_start = today if is_past_date else date.fromordinal(date_value.toordinal() + 1)
+        if not fits and capacity is not None and not allow_policy_override:
             suggestion = self.suggest_next_available_date(
                 user_id=user_id,
                 task_points=task_points,
-                start_date=today if is_past_date else date_value,
+                start_date=suggestion_start,
                 max_days=30,
                 exclude_task_id=exclude_task_id,
             )
-        elif not fits and capacity is not None and not task_too_large and allow_policy_override:
+        elif not fits and capacity is not None and allow_policy_override:
             suggestion = self.suggest_next_available_date(
                 user_id=user_id,
                 task_points=task_points,
-                start_date=today if is_past_date else date_value,
+                start_date=suggestion_start,
                 max_days=30,
                 exclude_task_id=exclude_task_id,
                 allow_policy_override=True,
@@ -78,8 +176,6 @@ class WorkloadService:
             message = "Assignment date cannot be in the past."
         elif capacity is None:
             message = "No daily capacity configured for this user."
-        elif task_too_large:
-            message = "This task is larger than the user's daily capacity, so it cannot be assigned on any day."
         elif blocked_by_policy and schedule_block is not None:
             message = schedule_block["message"]
         elif not fits:
@@ -117,17 +213,20 @@ class WorkloadService:
         exclude_task_id: int | None = None,
         allow_policy_override: bool = False,
     ) -> date | None:
-        capacity = self.get_user_capacity(user_id)
-        if capacity is None or task_points > capacity:
+        base_capacity = self.get_base_user_capacity(user_id)
+        if base_capacity is None:
             return None
 
         search_start = max(start_date, date.today())
         for offset in range(0, max_days + 1):
             candidate = date.fromordinal(search_start.toordinal() + offset)
+            candidate_capacity = self.get_user_capacity(user_id, date_value=candidate)
+            if candidate_capacity is None or task_points > candidate_capacity:
+                continue
             if not allow_policy_override and self.scheduling.get_block_for_date(user_id=user_id, date_value=candidate):
                 continue
             current = self.get_daily_points(user_id=user_id, date_value=candidate, exclude_task_id=exclude_task_id)
-            if current + task_points <= capacity:
+            if current + task_points <= candidate_capacity:
                 return candidate
         return None
 

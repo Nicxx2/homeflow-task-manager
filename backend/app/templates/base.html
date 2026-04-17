@@ -251,7 +251,7 @@
                 <option value="system" {% if user.theme_preference == "system" %}selected{% endif %}>System</option>
               </select>
             </form>
-            <span class="rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">v2.2</span>
+            <span class="rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">v2.3</span>
             <form method="post" action="/logout">
               <button class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Logout</button>
             </form>
@@ -262,6 +262,462 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+    function appFindScheduleForm(element) {
+      return element ? element.closest("[data-schedule-form]") : null;
+    }
+
+    function appFormatIsoDate(value) {
+      if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+        return "";
+      }
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, "0");
+      const day = String(value.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function appTomorrowIsoDate() {
+      const next = new Date();
+      next.setHours(0, 0, 0, 0);
+      next.setDate(next.getDate() + 1);
+      return appFormatIsoDate(next);
+    }
+
+    function appShiftIsoDate(value, days) {
+      if (!value) {
+        return "";
+      }
+      const parsed = new Date(`${value}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) {
+        return value;
+      }
+      parsed.setDate(parsed.getDate() + days);
+      return appFormatIsoDate(parsed);
+    }
+
+    function appHasVisibleScheduleOverlays() {
+      return Array.from(document.querySelectorAll("[id^='quick-schedule-overlay-']")).some(function(overlay) {
+        return !overlay.classList.contains("hidden");
+      });
+    }
+
+    function appSyncScheduleOverlayState() {
+      document.body.classList.toggle("overflow-hidden", appHasVisibleScheduleOverlays());
+    }
+
+    function appOpenScheduleOverlay(id) {
+      const overlay = document.getElementById(id);
+      if (!overlay) {
+        return;
+      }
+      overlay.classList.remove("hidden");
+      overlay.setAttribute("aria-hidden", "false");
+      appSyncScheduleOverlayState();
+    }
+
+    function appCloseScheduleOverlay(id) {
+      const overlay = document.getElementById(id);
+      if (!overlay) {
+        return;
+      }
+      overlay.classList.add("hidden");
+      overlay.setAttribute("aria-hidden", "true");
+      appSyncScheduleOverlayState();
+    }
+
+    function appSetScheduleShortcutFeedback(form, message, isError) {
+      const feedback = form ? form.querySelector("[data-schedule-shortcut-feedback]") : null;
+      if (!feedback) {
+        return;
+      }
+      feedback.textContent = message;
+      feedback.classList.toggle("text-red-600", Boolean(isError));
+      feedback.classList.toggle("dark:text-red-300", Boolean(isError));
+      feedback.classList.toggle("text-slate-500", !isError);
+      feedback.classList.toggle("dark:text-slate-400", !isError);
+    }
+
+    function appGetScheduleFeedbackContainer(form) {
+      return form ? form.querySelector("[data-schedule-feedback]") : null;
+    }
+
+    function appSetImmediateScheduleFeedback(form, message, tone) {
+      const container = appGetScheduleFeedbackContainer(form);
+      if (!container) {
+        return;
+      }
+      if (!message) {
+        container.innerHTML = "";
+        return;
+      }
+
+      let classes = "rounded-md border p-3 text-sm ";
+      let title = "Checking schedule";
+      if (tone === "error") {
+        classes += "border-red-200 bg-red-50 text-red-900 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200";
+        title = "This day cannot be used.";
+      } else if (tone === "success") {
+        classes += "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200";
+        title = "This day is available.";
+      } else {
+        classes += "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200";
+      }
+
+      container.innerHTML = `
+        <div class="${classes}">
+          <p class="font-medium">${title}</p>
+          <p class="mt-1">${message}</p>
+        </div>
+      `;
+    }
+
+    function appClearScheduleValidity(input) {
+      if (input) {
+        input.setCustomValidity("");
+      }
+    }
+
+    function appRequestSchedulePreview(form) {
+      if (!form) {
+        return;
+      }
+      const assigneeInput = form.querySelector("[data-schedule-assignee]");
+      const assignmentInput = form.querySelector("[data-schedule-assignment-date]");
+      const feedbackContainer = appGetScheduleFeedbackContainer(form);
+      const endpoint = form.dataset.schedulePreviewUrl;
+      if (!assigneeInput || !assignmentInput || !feedbackContainer || !endpoint) {
+        return;
+      }
+
+      const values = {
+        assignee_id: assigneeInput.value || "",
+        assignment_date: assignmentInput.value || "",
+      };
+      const effortInput = document.getElementById("selected_effort_level");
+      if (form.dataset.scheduleCreateFlow === "true") {
+        values.effort_level = effortInput ? effortInput.value || "" : "";
+      }
+      const overrideInput = form.querySelector("[name='allow_policy_override']");
+      if (overrideInput) {
+        values.allow_policy_override = overrideInput.checked ? "true" : "false";
+      }
+
+      if (form._schedulePreviewTimer) {
+        clearTimeout(form._schedulePreviewTimer);
+      }
+      const requestId = (form._schedulePreviewRequestId || 0) + 1;
+      form._schedulePreviewRequestId = requestId;
+      form._schedulePreviewTimer = setTimeout(async function() {
+        try {
+          const response = await fetch(`${endpoint}?${new URLSearchParams(values).toString()}`, {
+            credentials: "same-origin",
+            headers: { Accept: "text/html" },
+          });
+          const html = await response.text();
+          if (form._schedulePreviewRequestId !== requestId) {
+            return;
+          }
+          feedbackContainer.innerHTML = html;
+        } catch (_error) {
+          if (form._schedulePreviewRequestId !== requestId) {
+            return;
+          }
+          appSetImmediateScheduleFeedback(form, "The schedule preview could not be refreshed right now.", "error");
+        }
+      }, 120);
+    }
+
+    function appResetScheduleShortcutFeedback(source) {
+      const form = appFindScheduleForm(source);
+      const feedback = form ? form.querySelector("[data-schedule-shortcut-feedback]") : null;
+      if (!feedback) {
+        return;
+      }
+      appSetScheduleShortcutFeedback(form, feedback.dataset.defaultFeedback || "", false);
+    }
+
+    function appBeginScheduleDateEdit(input) {
+      const form = appFindScheduleForm(input);
+      if (!form) {
+        return;
+      }
+      const assigneeInput = form.querySelector("[data-schedule-assignee]");
+      const hasAssignee = Boolean(assigneeInput && assigneeInput.value);
+      if (hasAssignee && input.value) {
+        return;
+      }
+      appClearScheduleValidity(input);
+      appResetScheduleShortcutFeedback(input);
+      if (hasAssignee) {
+        appSetImmediateScheduleFeedback(form, "Choose a day to check availability for this user.", "neutral");
+      } else {
+        appSetImmediateScheduleFeedback(form, "Choose a user and date to preview workload impact before saving.", "neutral");
+      }
+    }
+
+    function appHandleScheduleInvalid(input) {
+      const form = appFindScheduleForm(input);
+      if (!form || !input) {
+        return;
+      }
+      if (input.validity.rangeUnderflow || (input.min && input.value && input.value < input.min)) {
+        input.setCustomValidity("Assignment date cannot be in the past.");
+        appSetScheduleShortcutFeedback(form, "Assignment date cannot be in the past.", true);
+        appSetImmediateScheduleFeedback(form, "Choose today or a future day for this assignment.", "error");
+        return;
+      }
+      input.setCustomValidity("Choose a valid assignment day.");
+      appSetImmediateScheduleFeedback(form, "Choose a valid assignment day before saving.", "error");
+    }
+
+    function appHandleScheduleDateInteraction(input) {
+      const form = appFindScheduleForm(input);
+      if (!form) {
+        return;
+      }
+      const assigneeInput = form.querySelector("[data-schedule-assignee]");
+      const hasAssignee = Boolean(assigneeInput && assigneeInput.value);
+      appClearScheduleValidity(input);
+      appResetScheduleShortcutFeedback(input);
+
+      if (!hasAssignee) {
+        appSetImmediateScheduleFeedback(form, "Choose a user and date to preview workload impact before saving.", "neutral");
+        return;
+      }
+
+      if (!input.value) {
+        appSetImmediateScheduleFeedback(form, "Choose an assignment day to preview workload impact before saving.", "neutral");
+        return;
+      }
+
+      if (input.min && input.value < input.min) {
+        input.setCustomValidity("Assignment date cannot be in the past.");
+        appSetScheduleShortcutFeedback(form, "Assignment date cannot be in the past.", true);
+        appSetImmediateScheduleFeedback(form, "Choose today or a future day for this assignment.", "error");
+        return;
+      }
+
+      input.setCustomValidity("");
+      appSetImmediateScheduleFeedback(form, "Checking availability for this day...", "neutral");
+      appRequestSchedulePreview(form);
+    }
+
+    function appValidateScheduleForm(form) {
+      const assigneeInput = form ? form.querySelector("[data-schedule-assignee]") : null;
+      const assignmentInput = form ? form.querySelector("[data-schedule-assignment-date]") : null;
+      if (!form || !assigneeInput || !assigneeInput.value || !assignmentInput) {
+        return true;
+      }
+      if (assignmentInput.min && assignmentInput.value && assignmentInput.value < assignmentInput.min) {
+        assignmentInput.setCustomValidity("Assignment date cannot be in the past.");
+        appSetScheduleShortcutFeedback(form, "Assignment date cannot be in the past.", true);
+        appSetImmediateScheduleFeedback(form, "Choose today or a future day for this assignment.", "error");
+        assignmentInput.reportValidity();
+        assignmentInput.focus();
+        return false;
+      }
+      appClearScheduleValidity(assignmentInput);
+      return true;
+    }
+
+    function appToggleAssignmentSection(selectEl) {
+      const form = appFindScheduleForm(selectEl);
+      if (!form) {
+        return;
+      }
+      const section = form.querySelector("[data-assignment-section]");
+      if (!section) {
+        return;
+      }
+      const isAssigned = Boolean(selectEl.value);
+      section.classList.toggle("hidden", !isAssigned);
+      if (!isAssigned) {
+        appSetScheduleShortcutFeedback(form, "This task will stay unassigned until you choose someone.", false);
+        appSetImmediateScheduleFeedback(form, "Choose a user and date to preview workload impact before saving.", "neutral");
+        return;
+      }
+      appResetScheduleShortcutFeedback(selectEl);
+      const assignmentInput = form.querySelector("[data-schedule-assignment-date]");
+      if (assignmentInput) {
+        appHandleScheduleDateInteraction(assignmentInput);
+      } else {
+        appRequestSchedulePreview(form);
+      }
+    }
+
+    function appResolveScheduleStartDate(form) {
+      const assignmentInput = form ? form.querySelector("[data-schedule-assignment-date]") : null;
+      const dueInput = form ? form.querySelector("[data-schedule-due-date]") : null;
+      if (assignmentInput) {
+        if (assignmentInput.dataset.userPickedDate === "true" && assignmentInput.value) {
+          return assignmentInput.value;
+        }
+        if (assignmentInput.dataset.nextAvailableDefaultStart === "tomorrow") {
+          return appTomorrowIsoDate();
+        }
+        if (assignmentInput.value) {
+          return assignmentInput.value;
+        }
+      }
+      return dueInput && dueInput.value ? dueInput.value : "";
+    }
+
+    function appResolveNextAvailableStartDate(form) {
+      const assignmentInput = form ? form.querySelector("[data-schedule-assignment-date]") : null;
+      if (assignmentInput && assignmentInput.dataset.userPickedDate === "true" && assignmentInput.value) {
+        return appShiftIsoDate(assignmentInput.value, 1);
+      }
+      return appResolveScheduleStartDate(form);
+    }
+
+    function appApplySuggestedScheduleDate(source, value) {
+      const form = appFindScheduleForm(source);
+      if (!form) {
+        return;
+      }
+      const assignmentInput = form.querySelector("[data-schedule-assignment-date]");
+      if (!assignmentInput || !value) {
+        return;
+      }
+      const minValue = assignmentInput.min || value;
+      let nextValue = value;
+      let message = "Assignment day updated.";
+      if (value < minValue) {
+        nextValue = minValue;
+        message = `That day is in the past, so the assignment was moved to ${minValue}.`;
+      }
+      assignmentInput.value = nextValue;
+      assignmentInput.dataset.userPickedDate = "true";
+      assignmentInput.dispatchEvent(new Event("change", { bubbles: true }));
+      assignmentInput.focus();
+      appSetScheduleShortcutFeedback(form, message, false);
+      appRequestSchedulePreview(form);
+    }
+
+    function appApplyScheduleDueDate(button) {
+      const form = appFindScheduleForm(button);
+      if (!form) {
+        return;
+      }
+      const dueInput = form.querySelector("[data-schedule-due-date]");
+      const assignmentInput = form.querySelector("[data-schedule-assignment-date]");
+      if (!dueInput || !assignmentInput || !dueInput.value) {
+        appSetScheduleShortcutFeedback(form, "Add a due date first.", true);
+        return;
+      }
+      const minValue = assignmentInput.min || dueInput.value;
+      let nextValue = dueInput.value;
+      let message = "Assignment day updated from the due date.";
+      if (dueInput.value < minValue) {
+        nextValue = minValue;
+        message = `The due date is in the past, so the assignment was moved to ${minValue}.`;
+      }
+      assignmentInput.value = nextValue;
+      assignmentInput.dataset.userPickedDate = "true";
+      assignmentInput.dispatchEvent(new Event("change", { bubbles: true }));
+      assignmentInput.focus();
+      appSetScheduleShortcutFeedback(form, message, false);
+      appRequestSchedulePreview(form);
+    }
+
+    async function appApplyNextAvailableDate(button) {
+      const form = appFindScheduleForm(button);
+      if (!form) {
+        return;
+      }
+      const assigneeInput = form.querySelector("[data-schedule-assignee]");
+      const assignmentInput = form.querySelector("[data-schedule-assignment-date]");
+      const dueInput = form.querySelector("[data-schedule-due-date]");
+      const overrideInput = form.querySelector("[name='allow_policy_override']");
+      const suggestedDateHolder = form.querySelector("[data-suggested-assignment-date]");
+      const endpoint = form.dataset.nextAvailableUrl;
+      if (!assigneeInput || !assigneeInput.value) {
+        appSetScheduleShortcutFeedback(form, "Select a user first.", true);
+        assigneeInput?.focus();
+        return;
+      }
+      if (!endpoint) {
+        appSetScheduleShortcutFeedback(form, "The next-free shortcut is unavailable here.", true);
+        return;
+      }
+      if (suggestedDateHolder && suggestedDateHolder.dataset.suggestedAssignmentDate) {
+        appApplySuggestedScheduleDate(button, suggestedDateHolder.dataset.suggestedAssignmentDate);
+        appSetScheduleShortcutFeedback(form, "Assignment day updated to the suggested next available day.", false);
+        return;
+      }
+
+      const params = new URLSearchParams({ assignee_id: assigneeInput.value });
+      const effortInput = document.getElementById("selected_effort_level");
+      if (form.dataset.scheduleCreateFlow === "true") {
+        if (!effortInput || !effortInput.value) {
+          appSetScheduleShortcutFeedback(form, "Select an effort level first.", true);
+          return;
+        }
+        params.set("effort_level", effortInput.value);
+      }
+
+      const startDate = appResolveNextAvailableStartDate(form);
+      if (startDate) {
+        params.set("start_date", startDate);
+      }
+      if (overrideInput && overrideInput.checked) {
+        params.set("allow_policy_override", "true");
+      }
+
+      try {
+        const response = await fetch(`${endpoint}?${params.toString()}`, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok || !payload.assignment_date) {
+          appSetScheduleShortcutFeedback(form, payload.message || "No next free day could be found.", true);
+          return;
+        }
+        if (assignmentInput) {
+          assignmentInput.value = payload.assignment_date;
+          assignmentInput.dataset.userPickedDate = "true";
+          assignmentInput.dispatchEvent(new Event("change", { bubbles: true }));
+          assignmentInput.focus();
+        }
+        appSetScheduleShortcutFeedback(form, payload.message || "Next free day found.", false);
+      } catch (_error) {
+        appSetScheduleShortcutFeedback(form, "The next free day could not be loaded right now.", true);
+      }
+    }
+
+    function appAdjustCapacityInput(button, delta) {
+      const input = button?.closest("form")?.querySelector("[data-capacity-adjust-input]");
+      if (!input || Number.isNaN(delta)) {
+        return;
+      }
+      const currentValue = parseInt(input.value || "0", 10);
+      input.value = String(Math.max(0, currentValue + delta));
+      input.focus();
+    }
+
+    document.addEventListener("keydown", function(event) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      const visibleOverlays = Array.from(document.querySelectorAll("[id^='quick-schedule-overlay-']")).filter(function(overlay) {
+        return !overlay.classList.contains("hidden");
+      });
+      const lastOverlay = visibleOverlays[visibleOverlays.length - 1];
+      if (lastOverlay) {
+        appCloseScheduleOverlay(lastOverlay.id);
+      }
+    });
+
+    document.addEventListener("DOMContentLoaded", function() {
+      appSyncScheduleOverlayState();
+    });
+
+    document.body.addEventListener("htmx:afterSwap", function() {
+      appSyncScheduleOverlayState();
+    });
+  </script>
   {% if user is defined and user %}
   <button
     id="assistant-toggle"

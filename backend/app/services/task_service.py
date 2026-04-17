@@ -23,6 +23,9 @@ class TaskService:
             raise ValueError(f"No points configured for level '{effort_level.value}'.")
         return config.points_value
 
+    def get_points_for_level(self, effort_level: EffortLevel) -> int:
+        return self._points_for_level(effort_level)
+
     def create_unassigned_task(self, payload: TaskCreate, created_by: User) -> Task:
         task = Task(
             title=payload.title.strip(),
@@ -168,6 +171,22 @@ class TaskService:
         self.db.refresh(task)
         return task
 
+    def update_task_schedule(
+        self,
+        task: Task,
+        *,
+        due_date: date,
+        assignee_id: int | None,
+        assignment_date: date | None,
+    ) -> Task:
+        task.due_date = due_date
+        task.assignee_id = assignee_id
+        task.assignment_date = assignment_date
+        self.db.add(task)
+        self.db.commit()
+        self.db.refresh(task)
+        return task
+
     def delete_task(self, task: Task, *, preserve_completed_history: bool = False) -> None:
         related_history = list(self.db.scalars(select(Task).where(Task.recurrence_parent_id == task.id)).all())
         history_to_delete = [] if preserve_completed_history else related_history
@@ -210,6 +229,37 @@ class TaskService:
         if not validation["valid"]:
             return False, validation
         self.assign_task(task, assignee_id=assignee_id, assignment_date=assignment_date)
+        return True, validation
+
+    def update_task_schedule_with_validation(
+        self,
+        task: Task,
+        *,
+        due_date: date,
+        assignee_id: int | None,
+        assignment_date: date | None,
+        allow_policy_override: bool = False,
+    ) -> tuple[bool, dict]:
+        if assignee_id is not None:
+            if assignment_date is None:
+                return False, {
+                    "valid": False,
+                    "message": "Choose an assignment date for the selected assignee.",
+                }
+            validation = WorkloadService(self.db).validate_assignment(
+                user_id=assignee_id,
+                date_value=assignment_date,
+                task_points=task.points_value,
+                exclude_task_id=task.id,
+                allow_policy_override=allow_policy_override,
+            )
+            if not validation["valid"]:
+                return False, validation
+        else:
+            validation = {"valid": True}
+            assignment_date = None
+
+        self.update_task_schedule(task, due_date=due_date, assignee_id=assignee_id, assignment_date=assignment_date)
         return True, validation
 
     @staticmethod

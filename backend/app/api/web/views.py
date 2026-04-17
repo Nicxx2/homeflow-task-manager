@@ -74,6 +74,10 @@ def _assignable_users_for_task(db: Session, task) -> list[User]:
     return users
 
 
+def _assignable_users_by_task(db: Session, tasks: list[Task]) -> dict[int, list[User]]:
+    return {task.id: _assignable_users_for_task(db, task) for task in tasks}
+
+
 def _current_path_with_query(request: Request, default: str) -> str:
     path = request.url.path or default
     query = request.url.query
@@ -184,6 +188,86 @@ def _initial_assignment_date_for_task(task) -> str:
     return (task.assignment_date or date.today()).isoformat()
 
 
+def _initial_quick_assignment_date_for_task(task) -> str:
+    if task.assignment_date and task.assignment_date >= date.today():
+        return task.assignment_date.isoformat()
+    return date.today().isoformat()
+
+
+def _capacity_override_default_start(target_day: date) -> date:
+    return max(target_day, date.today())
+
+
+def _task_create_form_defaults(user: User) -> dict:
+    return {
+        "title": "",
+        "description": "",
+        "due_date": date.today().isoformat(),
+        "effort_level": "",
+        "ai_suggested_level": "",
+        "ai_confidence": "",
+        "ai_reason": "",
+        "fallback_used": "false",
+        "provider_used": "",
+        "model_used": "",
+        "repeat_weekly": False,
+        "recurrence_interval_weeks": "1",
+        "recurrence_until": "",
+        "recurrence_count_limit": "",
+        "recurrence_blocked_behavior": "skip",
+        "use_personal_highlight": False,
+        "personal_highlight_color": user.accent_color,
+        "assignee_id_create": "",
+        "assignment_date_create": date.today().isoformat(),
+    }
+
+
+def _task_create_context(
+    *,
+    request: Request,
+    user: User,
+    db: Session,
+    form_error: str | None = None,
+    form_values: dict | None = None,
+    assignment_feedback: dict | None = None,
+) -> dict:
+    admin_service = AdminSettingsService(db)
+    values = _task_create_form_defaults(user)
+    if form_values:
+        values.update(form_values)
+
+    ai_result = None
+    selected_level = values.get("effort_level") or values.get("ai_suggested_level")
+    if selected_level:
+        try:
+            suggested_level = selected_level if isinstance(selected_level, EffortLevel) else EffortLevel(selected_level)
+        except ValueError:
+            suggested_level = EffortLevel.MEDIUM
+        ai_result = {
+            "suggested_level": suggested_level,
+            "confidence": values.get("ai_confidence") or "-",
+            "reason": values.get("ai_reason") or "Manual effort selection retained.",
+            "provider_used": values.get("provider_used") or "manual",
+            "model_used": values.get("model_used") or "manual",
+            "fallback_used": str(values.get("fallback_used") or "false").lower() == "true",
+        }
+
+    return {
+        "request": request,
+        "user": user,
+        "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
+        "today": date.today().isoformat(),
+        "ai_settings": admin_service.get_ai_settings(),
+        "ai_ui_status": admin_service.get_ai_ui_status(),
+        "personal_highlight_default": values.get("personal_highlight_color") or user.accent_color,
+        "form_error": form_error,
+        "form_values": values,
+        "assignable_users": _member_users(db),
+        "create_assignment_feedback": assignment_feedback,
+        "create_ai_result": ai_result,
+    }
+
+
 def _task_delete_contacts(db: Session, *, task) -> dict:
     admin_contacts = list(
         db.query(User)
@@ -242,33 +326,68 @@ def _task_detail_context(
     }
 
 
-def _next_available_assignment_shortcut(
+def _quick_schedule_context(
     *,
     db: Session,
     task: Task,
+    request: Request,
+    redirect_to: str,
+    assignment_feedback: dict | None = None,
+    error_message: str | None = None,
+    is_open: bool = False,
+    selected_assignee_id: int | None = None,
+    selected_assignment_date: date | None = None,
+) -> dict:
+    effective_assignee_id = selected_assignee_id if selected_assignee_id is not None else task.assignee_id
+    effective_assignment_date = selected_assignment_date or task.assignment_date
+    effective_feedback = assignment_feedback
+    if effective_feedback is None and effective_assignee_id is not None and effective_assignment_date is not None:
+        effective_feedback = WorkloadService(db).validate_assignment(
+            user_id=effective_assignee_id,
+            date_value=effective_assignment_date,
+            task_points=task.points_value,
+            exclude_task_id=task.id,
+        )
+
+    return {
+        "request": request,
+        "task": task,
+        "assignable_users": _assignable_users_for_task(db, task),
+        "redirect_to": redirect_to,
+        "assignment_feedback": effective_feedback,
+        "quick_schedule_assignment_date": (effective_assignment_date or date.today()).isoformat(),
+        "quick_schedule_selected_assignee_id": effective_assignee_id,
+        "quick_schedule_error": error_message,
+        "quick_schedule_open": is_open,
+        "today_iso": date.today().isoformat(),
+        "show_due_date_shortcut": task.due_date >= date.today(),
+    }
+
+
+def _next_available_assignment_shortcut(
+    *,
+    db: Session,
+    task_points: int,
     assignee_id: int,
     allow_policy_override: bool,
+    exclude_task_id: int | None = None,
+    start_date: date | None = None,
 ) -> dict:
     workload = WorkloadService(db)
     assignee = db.get(User, assignee_id)
     if not assignee or not assignee.is_active:
         return {"ok": False, "message": "Choose a valid user first."}
 
-    capacity = workload.get_user_capacity(assignee_id)
+    capacity = workload.get_base_user_capacity(assignee_id)
     if capacity is None:
         return {"ok": False, "message": "No daily capacity is configured for this user."}
-    if task.points_value > capacity:
-        return {
-            "ok": False,
-            "message": "This task is larger than the user's daily capacity, so no future day can fit it.",
-        }
 
     suggested_date = workload.suggest_next_available_date(
         user_id=assignee_id,
-        task_points=task.points_value,
-        start_date=date.today() + timedelta(days=1),
+        task_points=task_points,
+        start_date=start_date or (date.today() + timedelta(days=1)),
         max_days=30,
-        exclude_task_id=task.id,
+        exclude_task_id=exclude_task_id,
         allow_policy_override=allow_policy_override,
     )
     if suggested_date is None:
@@ -437,7 +556,8 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
     today_workload = []
     for item in users_for_today:
         points = workload.get_daily_points(user_id=item.id, date_value=today)
-        capacity = workload.get_user_capacity(item.id)
+        capacity_breakdown = workload.get_capacity_breakdown(user_id=item.id, date_value=today)
+        capacity = capacity_breakdown["total_capacity"]
         remaining_capacity = None if capacity is None else capacity - points
         schedule_block = workload.scheduling.get_block_for_date(user_id=item.id, date_value=today)
         tasks_today = workload.get_tasks_for_user_on_date(user_id=item.id, date_value=today)
@@ -465,6 +585,8 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
                 "user": item,
                 "points": points,
                 "capacity": capacity,
+                "base_capacity": capacity_breakdown["base_capacity"],
+                "extra_capacity": capacity_breakdown["extra_capacity"],
                 "remaining_capacity": remaining_capacity,
                 "tasks_today": tasks_today,
                 "next_task": next_task,
@@ -510,6 +632,7 @@ def tasks_page(
     )
     _apply_personal_task_highlights(db=db, user=user, tasks=tasks)
     _apply_personal_task_highlights(db=db, user=user, tasks=completed_history)
+    assignable_users_by_task = _assignable_users_by_task(db, tasks + completed_history)
     today = date.today()
     tomorrow = today + timedelta(days=1)
     selected_scope = "mine" if scope == "mine" else "team"
@@ -614,27 +737,14 @@ def tasks_page(
                 {"key": "completed", "label": "Completed", "count": len(completed_tasks)},
             ],
             "current_page_return_to": _encoded_redirect_target(_current_path_with_query(request, "/tasks")),
+            "assignable_users_by_task": assignable_users_by_task,
         },
     )
 
 
 @router.get("/tasks/new", response_class=HTMLResponse)
 def task_create_page(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    admin_service = AdminSettingsService(db)
-    ai_settings = admin_service.get_ai_settings()
-    ai_ui_status = admin_service.get_ai_ui_status()
-    return templates.TemplateResponse(
-        "tasks/create.html",
-        {
-            "request": request,
-            "user": user,
-            "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-            "today": date.today().isoformat(),
-            "ai_settings": ai_settings,
-            "ai_ui_status": ai_ui_status,
-            "personal_highlight_default": user.accent_color,
-        },
-    )
+    return templates.TemplateResponse("tasks/create.html", _task_create_context(request=request, user=user, db=db))
 
 
 @router.post("/tasks/ai-classify", response_class=HTMLResponse)
@@ -680,10 +790,32 @@ def task_create_submit(
     recurrence_blocked_behavior: str = Form("skip"),
     use_personal_highlight: str = Form("false"),
     personal_highlight_color: str = Form(""),
+    assignee_id_create: str = Form(""),
+    assignment_date_create: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ai_settings = AdminSettingsService(db).get_ai_settings()
+    form_values = {
+        "title": title,
+        "description": description,
+        "due_date": due_date,
+        "effort_level": effort_level,
+        "ai_suggested_level": ai_suggested_level,
+        "ai_confidence": ai_confidence,
+        "ai_reason": ai_reason,
+        "fallback_used": fallback_used,
+        "provider_used": provider_used,
+        "model_used": model_used,
+        "repeat_weekly": repeat_weekly.lower() in {"true", "on", "1", "yes"},
+        "recurrence_interval_weeks": recurrence_interval_weeks,
+        "recurrence_until": recurrence_until,
+        "recurrence_count_limit": recurrence_count_limit,
+        "recurrence_blocked_behavior": recurrence_blocked_behavior,
+        "use_personal_highlight": use_personal_highlight.lower() in {"true", "on", "1", "yes"},
+        "personal_highlight_color": personal_highlight_color or user.accent_color,
+        "assignee_id_create": assignee_id_create,
+        "assignment_date_create": assignment_date_create or date.today().isoformat(),
+    }
     highlight_enabled = use_personal_highlight.lower() in {"true", "on", "1", "yes"}
     normalized_highlight_color = None
     if highlight_enabled:
@@ -692,16 +824,13 @@ def task_create_submit(
         except ValueError:
             return templates.TemplateResponse(
                 "tasks/create.html",
-                {
-                    "request": request,
-                    "user": user,
-                    "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                    "today": date.today().isoformat(),
-                    "ai_settings": ai_settings,
-                    "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
-                    "personal_highlight_default": user.accent_color,
-                    "form_error": "Please choose a valid personal task highlight colour.",
-                },
+                _task_create_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    form_error="Please choose a valid personal task highlight colour.",
+                    form_values=form_values,
+                ),
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
     try:
@@ -709,16 +838,13 @@ def task_create_submit(
     except ValueError:
         return templates.TemplateResponse(
             "tasks/create.html",
-            {
-                "request": request,
-                "user": user,
-                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                "today": date.today().isoformat(),
-                "ai_settings": ai_settings,
-                "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
-                "personal_highlight_default": user.accent_color,
-                "form_error": "Please select a valid effort level before saving.",
-            },
+            _task_create_context(
+                request=request,
+                user=user,
+                db=db,
+                form_error="Please select a valid effort level before saving.",
+                form_values=form_values,
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -752,22 +878,30 @@ def task_create_submit(
                 message="Task create submit AI attempt returned invalid payload.",
                 context="task-create-submit",
             )
+    form_values.update(
+        {
+            "effort_level": level.value,
+            "ai_suggested_level": ai_level.value if ai_level else "",
+            "ai_confidence": ai_confidence,
+            "ai_reason": ai_reason,
+            "fallback_used": fallback_used,
+            "provider_used": provider_used,
+            "model_used": model_used,
+        }
+    )
 
     try:
         parsed_due_date = date.fromisoformat(due_date)
     except ValueError:
         return templates.TemplateResponse(
             "tasks/create.html",
-            {
-                "request": request,
-                "user": user,
-                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                "today": date.today().isoformat(),
-                "ai_settings": ai_settings,
-                "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
-                "personal_highlight_default": user.accent_color,
-                "form_error": "Please choose a valid due date.",
-            },
+            _task_create_context(
+                request=request,
+                user=user,
+                db=db,
+                form_error="Please choose a valid due date.",
+                form_values=form_values,
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -782,16 +916,13 @@ def task_create_submit(
     except ValueError:
         return templates.TemplateResponse(
             "tasks/create.html",
-            {
-                "request": request,
-                "user": user,
-                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                "today": date.today().isoformat(),
-                "ai_settings": ai_settings,
-                "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
-                "personal_highlight_default": user.accent_color,
-                "form_error": "Please provide valid recurring task settings.",
-            },
+            _task_create_context(
+                request=request,
+                user=user,
+                db=db,
+                form_error="Please provide valid recurring task settings.",
+                form_values=form_values,
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -812,24 +943,67 @@ def task_create_submit(
     except ValidationError:
         return templates.TemplateResponse(
             "tasks/create.html",
-            {
-                "request": request,
-                "user": user,
-                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                "today": date.today().isoformat(),
-                "ai_settings": ai_settings,
-                "ai_ui_status": AdminSettingsService(db).get_ai_ui_status(),
-                "personal_highlight_default": user.accent_color,
-                "form_error": "Please provide title, description, due date, and a valid effort level.",
-            },
+            _task_create_context(
+                request=request,
+                user=user,
+                db=db,
+                form_error="Please provide title, description, due date, and a valid effort level.",
+                form_values=form_values,
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+
+    selected_assignee_id = int(assignee_id_create) if assignee_id_create.strip().isdigit() else None
+    selected_assignment_date = None
+    if selected_assignee_id is not None:
+        try:
+            selected_assignment_date = date.fromisoformat(assignment_date_create)
+        except ValueError:
+            return templates.TemplateResponse(
+                "tasks/create.html",
+                _task_create_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    form_error="Please choose a valid assignment date.",
+                    form_values=form_values,
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task_points = TaskService(db).get_points_for_level(level)
+        assignment_feedback = WorkloadService(db).validate_assignment(
+            user_id=selected_assignee_id,
+            date_value=selected_assignment_date,
+            task_points=task_points,
+        )
+        if not assignment_feedback["valid"]:
+            return templates.TemplateResponse(
+                "tasks/create.html",
+                _task_create_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    form_error=assignment_feedback["message"],
+                    form_values=form_values,
+                    assignment_feedback=assignment_feedback,
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
     task = TaskService(db).create_unassigned_task(payload, user)
     if highlight_enabled:
         UserTaskDisplayService(db).set_highlight_color(
             user=user,
             task=task,
             highlight_color=normalized_highlight_color,
+        )
+    if selected_assignee_id is not None and selected_assignment_date is not None:
+        TaskService(db).update_task_schedule(
+            task,
+            due_date=parsed_due_date,
+            assignee_id=selected_assignee_id,
+            assignment_date=selected_assignment_date,
         )
     return RedirectResponse(url="/tasks", status_code=status.HTTP_302_FOUND)
 
@@ -1090,6 +1264,92 @@ def task_assign_submit(
     )
 
 
+@router.post("/tasks/{task_id}/quick-schedule", response_class=HTMLResponse)
+def task_quick_schedule_submit(
+    task_id: int,
+    request: Request,
+    due_date: str = Form(...),
+    assignee_id: str = Form(""),
+    assignment_date: str = Form(""),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    task_service = TaskService(db)
+    task = task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+    if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+
+    try:
+        parsed_due_date = date.fromisoformat(due_date)
+    except ValueError:
+        return templates.TemplateResponse(
+            "tasks/partials/quick_schedule_popover.html",
+            _quick_schedule_context(
+                db=db,
+                task=task,
+                request=request,
+                redirect_to=redirect_to or f"/tasks/{task.id}",
+                error_message="Choose a valid due date.",
+                is_open=True,
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    selected_assignee_id = int(assignee_id) if assignee_id.strip().isdigit() else None
+    selected_assignment_date = None
+    if selected_assignee_id is not None:
+        try:
+            selected_assignment_date = date.fromisoformat(assignment_date)
+        except ValueError:
+            return templates.TemplateResponse(
+                "tasks/partials/quick_schedule_popover.html",
+            _quick_schedule_context(
+                db=db,
+                task=task,
+                request=request,
+                redirect_to=redirect_to or f"/tasks/{task.id}",
+                error_message="Choose a valid assignment date.",
+                is_open=True,
+                selected_assignee_id=selected_assignee_id,
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    success, validation = task_service.update_task_schedule_with_validation(
+        task,
+        due_date=parsed_due_date,
+        assignee_id=selected_assignee_id,
+        assignment_date=selected_assignment_date,
+        allow_policy_override=False,
+    )
+    if not success:
+        task.due_date = parsed_due_date
+        return templates.TemplateResponse(
+            "tasks/partials/quick_schedule_popover.html",
+            _quick_schedule_context(
+                db=db,
+                task=task,
+                request=request,
+                redirect_to=redirect_to or f"/tasks/{task.id}",
+                assignment_feedback=validation,
+                error_message=validation.get("message"),
+                is_open=True,
+                selected_assignee_id=selected_assignee_id,
+                selected_assignment_date=selected_assignment_date,
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if request.headers.get("HX-Request") == "true":
+        response = HTMLResponse("")
+        response.headers["HX-Refresh"] = "true"
+        return response
+    return _redirect_to_target(request=request, redirect_to=redirect_to, default=f"/tasks/{task.id}")
+
+
 @router.post("/tasks/{task_id}/delete")
 def task_delete_submit(
     task_id: int,
@@ -1206,11 +1466,60 @@ def task_assignment_check(
     )
 
 
+@router.get("/task-create-assignment-check", response_class=HTMLResponse)
+def task_create_assignment_check(
+    request: Request,
+    assignee_id: int | None = None,
+    assignment_date: str | None = None,
+    effort_level: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not assignee_id or not assignment_date:
+        return templates.TemplateResponse("tasks/partials/assignment_feedback.html", {"request": request, "feedback": None})
+
+    if not effort_level:
+        return templates.TemplateResponse(
+            "tasks/partials/assignment_feedback.html",
+            {
+                "request": request,
+                "feedback": {
+                    "valid": False,
+                    "message": "Choose an effort level first to check whether this day fits or to suggest the next available day.",
+                },
+            },
+        )
+
+    try:
+        parsed_level = EffortLevel(effort_level)
+        parsed_date = date.fromisoformat(assignment_date)
+    except ValueError:
+        return templates.TemplateResponse(
+            "tasks/partials/assignment_feedback.html",
+            {
+                "request": request,
+                "feedback": {
+                    "valid": False,
+                    "message": "Choose an effort level and a valid assignment day to preview workload impact.",
+                },
+            },
+        )
+
+    task_points = TaskService(db).get_points_for_level(parsed_level)
+    feedback = WorkloadService(db).validate_assignment(
+        user_id=assignee_id,
+        date_value=parsed_date,
+        task_points=task_points,
+    )
+    return templates.TemplateResponse("tasks/partials/assignment_feedback.html", {"request": request, "feedback": feedback})
+
+
 @router.get("/tasks/{task_id}/assignment-next-available")
 def task_assignment_next_available(
     task_id: int,
     assignee_id: int | None = None,
     allow_policy_override: str = "false",
+    start_date: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1229,11 +1538,55 @@ def task_assignment_next_available(
         "1",
         "yes",
     }
+    parsed_start_date = None
+    if start_date:
+        try:
+            parsed_start_date = date.fromisoformat(start_date)
+        except ValueError:
+            parsed_start_date = None
     payload = _next_available_assignment_shortcut(
         db=db,
-        task=task,
+        task_points=task.points_value,
         assignee_id=assignee_id,
         allow_policy_override=allow_override,
+        exclude_task_id=task.id,
+        start_date=parsed_start_date,
+    )
+    status_code = status.HTTP_200_OK if payload["ok"] else status.HTTP_400_BAD_REQUEST
+    return JSONResponse(payload, status_code=status_code)
+
+
+@router.get("/task-create-assignment-next-available")
+def task_create_assignment_next_available(
+    assignee_id: int | None = None,
+    effort_level: str | None = None,
+    start_date: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not assignee_id:
+        return JSONResponse({"ok": False, "message": "Select a user first."}, status_code=status.HTTP_400_BAD_REQUEST)
+    if not effort_level:
+        return JSONResponse({"ok": False, "message": "Select an effort level first."}, status_code=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        parsed_level = EffortLevel(effort_level)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid effort level.") from exc
+
+    parsed_start_date = None
+    if start_date:
+        try:
+            parsed_start_date = date.fromisoformat(start_date)
+        except ValueError:
+            parsed_start_date = None
+
+    payload = _next_available_assignment_shortcut(
+        db=db,
+        task_points=TaskService(db).get_points_for_level(parsed_level),
+        assignee_id=assignee_id,
+        allow_policy_override=False,
+        start_date=parsed_start_date,
     )
     status_code = status.HTTP_200_OK if payload["ok"] else status.HTTP_400_BAD_REQUEST
     return JSONResponse(payload, status_code=status_code)
@@ -1373,6 +1726,44 @@ def schedule_away_delete(
     return RedirectResponse(url="/schedule", status_code=status.HTTP_302_FOUND)
 
 
+@router.post("/day-view/capacity-extra")
+def day_view_capacity_extra_submit(
+    request: Request,
+    member_id: int = Form(...),
+    start_day: str = Form(...),
+    end_day: str = Form(""),
+    extra_capacity_points: str = Form("0"),
+    redirect_to: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not (user.is_admin or user.id == member_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
+
+    try:
+        parsed_start_day = date.fromisoformat(start_day)
+        parsed_end_day = date.fromisoformat(end_day) if end_day else parsed_start_day
+        parsed_extra_points = int(extra_capacity_points or "0")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid capacity override.") from exc
+
+    if parsed_start_day < date.today():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Extra capacity can only be planned for today or later.")
+    if parsed_end_day < parsed_start_day:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End date must be on or after the start date.")
+
+    try:
+        WorkloadService(db).set_extra_capacity_points_range(
+            user_id=member_id,
+            start_date=parsed_start_day,
+            end_date=parsed_end_day,
+            extra_capacity_points=parsed_extra_points,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _redirect_to_target(request=request, redirect_to=redirect_to, default=f"/day-view?day={parsed_start_day.isoformat()}")
+
+
 @router.get("/day-view", response_class=HTMLResponse)
 def day_view(
     request: Request,
@@ -1394,11 +1785,13 @@ def day_view(
     users = _member_users(db)
     workload = WorkloadService(db)
     rows = []
+    effort_configs = {config.level.value: config.points_value for config in AdminSettingsService(db).get_effort_configs()}
     for member in users:
         if selected_scope == "mine" and member.id != user.id:
             continue
         points = workload.get_daily_points(user_id=member.id, date_value=target_day)
-        cap = workload.get_user_capacity(member.id)
+        capacity_breakdown = workload.get_capacity_breakdown(user_id=member.id, date_value=target_day)
+        cap = capacity_breakdown["total_capacity"]
         tasks = workload.get_tasks_for_user_on_date(user_id=member.id, date_value=target_day)
         _apply_personal_task_highlights(db=db, user=user, tasks=tasks)
         rows.append(
@@ -1406,12 +1799,21 @@ def day_view(
                 "member": member,
                 "points": points,
                 "capacity": cap,
+                "base_capacity": capacity_breakdown["base_capacity"],
+                "extra_capacity": capacity_breakdown["extra_capacity"],
                 "remaining_capacity": None if cap is None else cap - points,
+                "can_add_extra_capacity": capacity_breakdown["base_capacity"] is not None
+                and (user.is_admin or user.id == member.id),
+                "extra_capacity_input": capacity_breakdown["extra_capacity"],
+                "capacity_override_start": _capacity_override_default_start(target_day).isoformat(),
+                "capacity_override_end": _capacity_override_default_start(target_day).isoformat(),
                 "tasks": [
                     {
                         "task": task,
                         "can_open": _can_access_task_detail(viewer=user, task=task),
                         "can_update_status": _can_update_task_status(viewer=user, task=task),
+                        "can_manage_task": _can_manage_task(viewer=user, task=task) and not _is_history_occurrence(task),
+                        "assignable_users": _assignable_users_for_task(db, task),
                     }
                     for task in tasks
                 ],
@@ -1428,6 +1830,7 @@ def day_view(
             "scope": selected_scope,
             "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
             "current_page_url": _current_path_with_query(request, "/day-view"),
+            "effort_shortcuts": effort_configs,
         },
     )
 

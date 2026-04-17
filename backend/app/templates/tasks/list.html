@@ -89,7 +89,7 @@
   {% endfor %}
 </section>
 
-{% macro task_card(task, statuses, user, current_page_url) %}
+{% macro task_card(task, statuses, user, current_page_url, assignable_users_by_task) %}
 {% set card_state_class = "app-surface" %}
 {% if task.status.value == "completed" and task.recurrence_parent_id %}
   {% set card_state_class = "app-surface" %}
@@ -139,6 +139,11 @@
       </div>
     </div>
     <div class="flex items-center gap-3">
+      {% if not (task.status.value == "completed" and task.recurrence_parent_id) %}
+      {% set assignable_users = assignable_users_by_task.get(task.id, []) %}
+      {% set redirect_to = current_page_url %}
+      {% include "tasks/partials/quick_schedule_popover.html" %}
+      {% endif %}
       {% if user.is_admin or task.assignee_id == user.id %}
       <form method="post" action="/tasks/{{ task.id }}/status">
         <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
@@ -160,11 +165,11 @@
 </article>
 {% endmacro %}
 
-{% macro task_scroll_list(items, statuses, user, current_page_url, empty_message) %}
+{% macro task_scroll_list(items, statuses, user, current_page_url, empty_message, assignable_users_by_task) %}
   {% if items %}
   <div class="max-h-[29rem] space-y-3 overflow-y-auto pr-1">
     {% for task in items %}
-      {{ task_card(task, statuses, user, current_page_url) }}
+      {{ task_card(task, statuses, user, current_page_url, assignable_users_by_task) }}
     {% endfor %}
   </div>
   {% else %}
@@ -184,6 +189,6 @@
       {{ selected_bucket["items"]|length }} item{{ "" if selected_bucket["items"]|length == 1 else "s" }}
     </span>
   </div>
-  {{ task_scroll_list(selected_bucket["items"], statuses, user, current_page_url, selected_bucket["empty_message"]) }}
+  {{ task_scroll_list(selected_bucket["items"], statuses, user, current_page_url, selected_bucket["empty_message"], assignable_users_by_task) }}
 </section>
 {% endblock %}

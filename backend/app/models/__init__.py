@@ -6,6 +6,7 @@ from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user_away_period import UserAwayPeriod
 from backend.app.models.user import User
 from backend.app.models.user_daily_capacity import UserDailyCapacity
+from backend.app.models.user_daily_capacity_override import UserDailyCapacityOverride
 from backend.app.models.user_scheduling_preference import UserSchedulingPreference
 from backend.app.models.user_task_display_preference import UserTaskDisplayPreference
 
@@ -14,6 +15,7 @@ __all__ = [
     "Task",
     "TaskEffortConfig",
     "UserDailyCapacity",
+    "UserDailyCapacityOverride",
     "UserSchedulingPreference",
     "UserAwayPeriod",
     "UserTaskDisplayPreference",

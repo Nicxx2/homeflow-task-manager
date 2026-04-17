@@ -37,36 +37,108 @@
   {% for row in rows %}
   <article class="app-surface density-panel rounded-xl border p-4">
     <div class="flex items-center justify-between mb-3">
-      <h2 class="app-user-accent font-medium">{{ row.member.full_name }}</h2>
-      <div class="text-right text-sm text-slate-600 dark:text-slate-300">
-        <p>{{ row.points }} / {{ row.capacity if row.capacity is not none else "not set" }} pts</p>
-        <p class="text-xs text-slate-500 dark:text-slate-400">
-          {% if row.remaining_capacity is none %}
-            Remaining unavailable
-          {% elif row.remaining_capacity >= 0 %}
-            {{ row.remaining_capacity }} pts left
-          {% else %}
-            {{ row.remaining_capacity | abs }} pts over
-          {% endif %}
-        </p>
+      <div>
+        <h2 class="app-user-accent font-medium">{{ row.member.full_name }}</h2>
+        {% if row.extra_capacity %}
+        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Extra capacity added: +{{ row.extra_capacity }} pts on this day.</p>
+        {% endif %}
+      </div>
+      <div class="flex items-start gap-3">
+        <div class="text-right text-sm text-slate-600 dark:text-slate-300">
+          <p>{{ row.points }} / {{ row.capacity if row.capacity is not none else "not set" }} pts</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            {% if row.remaining_capacity is none %}
+              Remaining unavailable
+            {% elif row.remaining_capacity >= 0 %}
+              {{ row.remaining_capacity }} pts left
+            {% else %}
+              {{ row.remaining_capacity | abs }} pts over
+            {% endif %}
+          </p>
+        </div>
+        {% if row.can_add_extra_capacity %}
+        <details class="relative">
+          <summary class="flex cursor-pointer list-none items-center rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+            Extra capacity
+          </summary>
+          <div class="absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+            <form method="post" action="/day-view/capacity-extra" class="space-y-3">
+              <input type="hidden" name="member_id" value="{{ row.member.id }}" />
+              <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+              <div>
+                <p class="text-sm font-medium">Extra capacity</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">Plan extra points for one day or a short date range without changing the member's base limit.</p>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <label class="block text-sm">
+                  <span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Start day</span>
+                  <input
+                    type="date"
+                    min="{{ row.capacity_override_start }}"
+                    name="start_day"
+                    value="{{ row.capacity_override_start }}"
+                    class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+                  />
+                </label>
+                <label class="block text-sm">
+                  <span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">End day</span>
+                  <input
+                    type="date"
+                    min="{{ row.capacity_override_start }}"
+                    name="end_day"
+                    value="{{ row.capacity_override_end }}"
+                    class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+                  />
+                </label>
+              </div>
+              <label class="block text-sm">
+                <span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Extra points</span>
+                <input
+                  type="number"
+                  min="0"
+                  name="extra_capacity_points"
+                  value="{{ row.extra_capacity_input }}"
+                  class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+                  data-capacity-adjust-input
+                />
+              </label>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick="appAdjustCapacityInput(this, {{ effort_shortcuts['low'] if effort_shortcuts.get('low') else 0 }})">+Low</button>
+                <button type="button" class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick="appAdjustCapacityInput(this, {{ effort_shortcuts['medium'] if effort_shortcuts.get('medium') else 0 }})">+Medium</button>
+                <button type="button" class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick="appAdjustCapacityInput(this, {{ effort_shortcuts['high'] if effort_shortcuts.get('high') else 0 }})">+High</button>
+              </div>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400">Tap chips more than once for combinations, or enter points directly. Use 0 to clear a planned override for that whole range.</p>
+              <button class="app-primary-button rounded-md px-4 py-2 text-sm" type="submit">Save capacity</button>
+            </form>
+          </div>
+        </details>
+        {% endif %}
       </div>
     </div>
     <div class="space-y-2">
       {% for item in row.tasks %}
       <div class="{% if item.task.due_date < target_day and item.task.status.value != 'completed' %}app-status-overdue{% elif item.task.status.value == 'in_progress' %}app-status-progress{% elif item.task.assignee_id is none %}app-status-unassigned{% else %}app-surface{% endif %} {% if item.task.personal_highlight_color %}app-task-highlight{% endif %} rounded-md border px-3 py-2" {% if item.task.personal_highlight_color %}style="--task-highlight: {{ item.task.personal_highlight_color }};"{% endif %}>
         {% if item.can_open %}
-        <a href="/tasks/{{ item.task.id }}" class="block hover:bg-slate-50 dark:hover:bg-slate-800">
-          <div class="flex items-center gap-2">
-            <p class="app-task-title text-sm font-medium">{{ item.task.title }}</p>
-            {% if item.task.recurrence_pattern == "weekly" %}
-            <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">Recurring</span>
-            {% endif %}
-            {% if item.task.personal_highlight_color %}
-            <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-700 dark:text-slate-200" style="border-color: {{ item.task.personal_highlight_color }}; color: {{ item.task.personal_highlight_color }};">My highlight</span>
-            {% endif %}
-          </div>
-          <p class="text-xs text-slate-500 dark:text-slate-400">{{ item.task.points_value }} pts | {{ item.task.status.value }}</p>
-        </a>
+        <div class="flex items-start justify-between gap-3">
+          <a href="/tasks/{{ item.task.id }}" class="block min-w-0 flex-1 hover:bg-slate-50 dark:hover:bg-slate-800">
+            <div class="flex items-center gap-2">
+              <p class="app-task-title text-sm font-medium">{{ item.task.title }}</p>
+              {% if item.task.recurrence_pattern == "weekly" %}
+              <span class="app-recurring-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">Recurring</span>
+              {% endif %}
+              {% if item.task.personal_highlight_color %}
+              <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-700 dark:text-slate-200" style="border-color: {{ item.task.personal_highlight_color }}; color: {{ item.task.personal_highlight_color }};">My highlight</span>
+              {% endif %}
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ item.task.points_value }} pts | {{ item.task.status.value }}</p>
+          </a>
+          {% if item.can_manage_task %}
+          {% set task = item.task %}
+          {% set assignable_users = item.assignable_users %}
+          {% set redirect_to = current_page_url %}
+          {% include "tasks/partials/quick_schedule_popover.html" %}
+          {% endif %}
+        </div>
         {% if item.can_update_status %}
         <form method="post" action="/tasks/{{ item.task.id }}/status" class="mt-2">
           <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />

@@ -167,8 +167,9 @@
 <section class="app-surface density-panel mt-5 rounded-xl border p-5">
   <h2 class="font-medium mb-1">Assign Task</h2>
   <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Assignment is a separate step from task creation.</p>
-  <form method="post" action="/tasks/{{ task.id }}/assign" class="space-y-4">
+  <form method="post" action="/tasks/{{ task.id }}/assign" class="space-y-4" data-schedule-form data-schedule-preview-url="/tasks/{{ task.id }}/assignment-check" data-next-available-url="/tasks/{{ task.id }}/assignment-next-available" onsubmit="return appValidateScheduleForm(this)">
     <input type="hidden" name="redirect_to" value="{{ return_to or '' }}" />
+    <input type="hidden" value="{{ task.due_date }}" data-schedule-due-date />
     <div class="grid md:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm mb-1">Assignee</label>
@@ -176,11 +177,9 @@
           name="assignee_id"
           id="assignee_id"
           class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          data-schedule-assignee
+          onchange="appResetScheduleShortcutFeedback(this); appRequestSchedulePreview(appFindScheduleForm(this))"
           required
-          hx-get="/tasks/{{ task.id }}/assignment-check"
-          hx-trigger="change"
-          hx-include="#assignee_id,#assignment_date,#allow_policy_override"
-          hx-target="#assignment-feedback"
         >
           <option value="">Select a user</option>
           {% for item in all_users %}
@@ -199,32 +198,34 @@
           class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
           value="{{ assignment_feedback.selected_assignment_date if assignment_feedback else initial_assignment_date }}"
           min="{{ today_iso }}"
+          data-schedule-assignment-date
+          data-next-available-default-start="tomorrow"
+          data-user-picked-date="{% if (assignment_feedback and assignment_feedback.selected_assignment_date) or (task.assignee_id and task.assignment_date) %}true{% else %}false{% endif %}"
           required
-          hx-get="/tasks/{{ task.id }}/assignment-check"
-          hx-trigger="change"
-          hx-include="#assignee_id,#assignment_date,#allow_policy_override"
-          hx-target="#assignment-feedback"
+          onfocus="appBeginScheduleDateEdit(this)"
+          onclick="appBeginScheduleDateEdit(this)"
+          oninput="this.dataset.userPickedDate='true'; appHandleScheduleDateInteraction(this)"
+          onchange="this.dataset.userPickedDate='true'; appHandleScheduleDateInteraction(this)"
+          oninvalid="appHandleScheduleInvalid(this)"
         />
         <div class="mt-2 flex flex-wrap gap-2">
-          {% if show_due_date_shortcut %}
           <button
             type="button"
             class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            onclick="applySuggestedAssignmentDate('{{ task.due_date }}')"
+            onclick="appApplyScheduleDueDate(this)"
           >
             Use due date
           </button>
-          {% endif %}
           <button
             type="button"
             class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            onclick="applyNextAvailableAssignmentDate({{ task.id }})"
+            onclick="appApplyNextAvailableDate(this)"
           >
             Next available day
           </button>
         </div>
-        <p id="assignment-shortcut-feedback" class="mt-2 text-xs text-slate-500 dark:text-slate-400">
-          Default starts from today. You can jump to the due date or the next available day.
+        <p id="assignment-shortcut-feedback" class="mt-2 text-xs text-slate-500 dark:text-slate-400" data-schedule-shortcut-feedback data-default-feedback="Default starts from tomorrow. If you choose a day first, the next available search starts from that day.">
+          Default starts from tomorrow. If you choose a day first, the next available search starts from that day.
         </p>
       </div>
     </div>
@@ -237,10 +238,7 @@
         name="allow_policy_override"
         value="true"
         {% if assignment_feedback and assignment_feedback.allow_policy_override %}checked{% endif %}
-        hx-get="/tasks/{{ task.id }}/assignment-check"
-        hx-trigger="change"
-        hx-include="#assignee_id,#assignment_date,#allow_policy_override"
-        hx-target="#assignment-feedback"
+        onchange="appRequestSchedulePreview(appFindScheduleForm(this))"
       />
       Force assign on a blocked date
     </label>
@@ -252,7 +250,7 @@
     <div class="text-sm text-slate-600 dark:text-slate-300">
       This task uses <span class="font-medium">{{ task.points_value }} points</span> on the selected assignment day.
     </div>
-    <div id="assignment-feedback">
+    <div id="assignment-feedback" data-schedule-feedback>
       {% include "tasks/partials/assignment_feedback.html" with context %}
     </div>
 
@@ -267,65 +265,6 @@
   </form>
   {% endif %}
 </section>
-<script>
-  function setAssignmentShortcutFeedback(message, isError) {
-    const feedback = document.getElementById("assignment-shortcut-feedback");
-    if (!feedback) {
-      return;
-    }
-    feedback.textContent = message;
-    feedback.classList.toggle("text-red-600", Boolean(isError));
-    feedback.classList.toggle("dark:text-red-300", Boolean(isError));
-    feedback.classList.toggle("text-slate-500", !isError);
-    feedback.classList.toggle("dark:text-slate-400", !isError);
-  }
-
-  function applySuggestedAssignmentDate(value) {
-    const input = document.getElementById("assignment_date");
-    if (!input) {
-      return;
-    }
-    const minValue = input.min || value;
-    input.value = value < minValue ? minValue : value;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    input.focus();
-    setAssignmentShortcutFeedback("Assignment date updated.", false);
-  }
-
-  async function applyNextAvailableAssignmentDate(taskId) {
-    const assigneeInput = document.getElementById("assignee_id");
-    if (!assigneeInput || !assigneeInput.value) {
-      setAssignmentShortcutFeedback("Select a user first.", true);
-      if (assigneeInput) {
-        assigneeInput.focus();
-      }
-      return;
-    }
-
-    const overrideInput = document.getElementById("allow_policy_override");
-    const params = new URLSearchParams({ assignee_id: assigneeInput.value });
-    if (overrideInput && overrideInput.checked) {
-      params.set("allow_policy_override", "true");
-    }
-
-    try {
-      const response = await fetch(`/tasks/${taskId}/assignment-next-available?${params.toString()}`, {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.ok || !payload.assignment_date) {
-        setAssignmentShortcutFeedback(payload.message || "No next available day could be found.", true);
-        return;
-      }
-
-      setAssignmentShortcutFeedback(payload.message, false);
-      applySuggestedAssignmentDate(payload.assignment_date);
-    } catch (error) {
-      setAssignmentShortcutFeedback("The next available day could not be loaded right now.", true);
-    }
-  }
-</script>
 {% endif %}
 
 <div
