@@ -182,7 +182,7 @@ class AppAssistantService:
         eligible = []
         for member in self._member_users():
             current = self.workload.get_daily_points(user_id=member.id, date_value=today)
-            capacity = self.workload.get_user_capacity(member.id)
+            capacity = self.workload.get_user_capacity(member.id, date_value=today)
             if capacity is None:
                 continue
             remaining = capacity - current
@@ -212,7 +212,7 @@ class AppAssistantService:
         items = []
         for member in self._member_users():
             current = self.workload.get_daily_points(user_id=member.id, date_value=today)
-            capacity = self.workload.get_user_capacity(member.id)
+            capacity = self.workload.get_user_capacity(member.id, date_value=today)
             remaining = None if capacity is None else capacity - current
             items.append(
                 {

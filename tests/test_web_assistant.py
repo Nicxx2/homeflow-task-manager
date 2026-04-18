@@ -15,6 +15,7 @@ from backend.app.schemas.auth import RegisterRequest
 from backend.app.schemas.task import TaskCreate
 from backend.app.services.auth_service import AuthService
 from backend.app.services.task_service import TaskService
+from backend.app.services.workload_service import WorkloadService
 
 
 def setup_module():
@@ -127,6 +128,61 @@ def test_assistant_reports_who_has_most_capacity_left():
         assert response.status_code == 200
         payload = response.json()
         assert payload["items"][0]["title"] == "Cap Mate"
+    finally:
+        db.close()
+
+
+def test_assistant_capacity_query_uses_today_extra_capacity_override():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"cap-override-viewer-{token}@example.com", full_name="Override Viewer", capacity=6)
+        teammate = _create_user(db, email=f"cap-override-mate-{token}@example.com", full_name="Override Mate", capacity=5)
+        taken = _create_unassigned_task(
+            db,
+            creator=viewer,
+            title=f"Override Load {token}",
+            due_date=date.today(),
+            effort_level=EffortLevel.LOW,
+        )
+        TaskService(db).assign_task(taken, assignee_id=teammate.id, assignment_date=date.today())
+        WorkloadService(db).set_extra_capacity_points_range(
+            user_id=teammate.id,
+            start_date=date.today(),
+            end_date=date.today(),
+            extra_capacity_points=3,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post("/assistant/chat", data={"message": "who has enough capacity for one medium task?"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert any(item["title"] == "Override Mate" for item in payload["items"])
+    finally:
+        db.close()
+
+
+def test_assistant_most_capacity_uses_today_extra_capacity_override():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"most-cap-override-viewer-{token}@example.com", full_name="Most Cap Viewer", capacity=8)
+        teammate = _create_user(db, email=f"most-cap-override-mate-{token}@example.com", full_name="Most Cap Mate", capacity=5)
+        WorkloadService(db).set_extra_capacity_points(
+            user_id=teammate.id,
+            date_value=date.today(),
+            extra_capacity_points=5,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post("/assistant/chat", data={"message": "who has the most capacity left?"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["items"][0]["title"] == "Most Cap Mate"
     finally:
         db.close()
 

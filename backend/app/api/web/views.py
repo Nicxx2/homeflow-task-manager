@@ -78,6 +78,17 @@ def _assignable_users_by_task(db: Session, tasks: list[Task]) -> dict[int, list[
     return {task.id: _assignable_users_for_task(db, task) for task in tasks}
 
 
+def _task_planned_date(task: Task) -> date:
+    return task.assignment_date or task.due_date
+
+
+def _sort_tasks_by_planned_date(tasks: list[Task]) -> list[Task]:
+    return sorted(
+        tasks,
+        key=lambda task: (_task_planned_date(task), task.due_date, task.created_at, task.id),
+    )
+
+
 def _current_path_with_query(request: Request, default: str) -> str:
     path = request.url.path or default
     query = request.url.query
@@ -560,7 +571,7 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
         capacity = capacity_breakdown["total_capacity"]
         remaining_capacity = None if capacity is None else capacity - points
         schedule_block = workload.scheduling.get_block_for_date(user_id=item.id, date_value=today)
-        tasks_today = workload.get_tasks_for_user_on_date(user_id=item.id, date_value=today)
+        tasks_today = _sort_tasks_by_planned_date(workload.get_tasks_for_user_on_date(user_id=item.id, date_value=today))
         next_task = next((task for task in tasks_today if task.status != TaskStatus.COMPLETED), None)
         _apply_personal_task_highlights(db=db, user=user, tasks=tasks_today)
         status_label = "Capacity unset"
@@ -642,29 +653,49 @@ def tasks_page(
         for task in completed_history
         if _task_matches_scope(task=task, user=user, scope=selected_scope)
     ]
-    overdue_tasks = [
-        task
-        for task in scoped_tasks
-        if task.status != TaskStatus.COMPLETED and task.due_date < today
-    ]
-    up_next_tasks = [
-        task
-        for task in scoped_tasks
-        if task.status == TaskStatus.PENDING and task.assignee_id is not None and today <= task.due_date <= tomorrow
-    ]
-    future_tasks = [
-        task
-        for task in scoped_tasks
-        if task.status == TaskStatus.PENDING and task.assignee_id is not None and task.due_date > tomorrow
-    ]
-    unassigned_tasks = [
-        task
-        for task in scoped_tasks
-        if task.status != TaskStatus.COMPLETED and task.assignee_id is None and task.due_date >= today
-    ]
-    in_progress_tasks = [
-        task for task in scoped_tasks if task.status == TaskStatus.IN_PROGRESS and task.due_date >= today
-    ]
+    overdue_tasks = _sort_tasks_by_planned_date(
+        [
+            task
+            for task in scoped_tasks
+            if task.status != TaskStatus.COMPLETED
+            and (
+                task.due_date < today
+                or (task.assignee_id is not None and task.assignment_date is not None and task.assignment_date < today)
+            )
+        ]
+    )
+    up_next_tasks = _sort_tasks_by_planned_date(
+        [
+            task
+            for task in scoped_tasks
+            if task.status == TaskStatus.PENDING
+            and task.assignee_id is not None
+            and task.assignment_date is not None
+            and today <= task.assignment_date <= tomorrow
+        ]
+    )
+    future_tasks = _sort_tasks_by_planned_date(
+        [
+            task
+            for task in scoped_tasks
+            if task.status == TaskStatus.PENDING
+            and task.assignee_id is not None
+            and task.assignment_date is not None
+            and task.assignment_date > tomorrow
+        ]
+    )
+    unassigned_tasks = _sort_tasks_by_planned_date(
+        [
+            task
+            for task in scoped_tasks
+            if task.status != TaskStatus.COMPLETED and task.assignee_id is None and task.due_date >= today
+        ]
+    )
+    in_progress_tasks = _sort_tasks_by_planned_date(
+        [
+            task for task in scoped_tasks if task.status == TaskStatus.IN_PROGRESS and task.assignee_id is not None
+        ]
+    )
     completed_tasks = sorted(
         [task for task in scoped_tasks if task.status == TaskStatus.COMPLETED] + scoped_completed_history,
         key=lambda task: (task.due_date, task.created_at),
@@ -679,13 +710,13 @@ def tasks_page(
         },
         "up_next": {
             "label": "Next Up",
-            "description": "Assigned pending work due today or tomorrow.",
+            "description": "Assigned pending work planned for today or tomorrow.",
             "items": up_next_tasks,
-            "empty_message": "Nothing assigned is due today or tomorrow.",
+            "empty_message": "Nothing assigned is planned for today or tomorrow.",
         },
         "later": {
             "label": "Later Queue",
-            "description": "Assigned pending work scheduled after tomorrow.",
+            "description": "Assigned pending work planned after tomorrow.",
             "items": future_tasks,
             "empty_message": "Nothing is scheduled beyond tomorrow right now.",
         },
@@ -1792,7 +1823,7 @@ def day_view(
         points = workload.get_daily_points(user_id=member.id, date_value=target_day)
         capacity_breakdown = workload.get_capacity_breakdown(user_id=member.id, date_value=target_day)
         cap = capacity_breakdown["total_capacity"]
-        tasks = workload.get_tasks_for_user_on_date(user_id=member.id, date_value=target_day)
+        tasks = _sort_tasks_by_planned_date(workload.get_tasks_for_user_on_date(user_id=member.id, date_value=target_day))
         _apply_personal_task_highlights(db=db, user=user, tasks=tasks)
         rows.append(
             {

@@ -50,14 +50,29 @@ def _create_user(db, *, email: str, full_name: str, capacity: int, is_admin: boo
     return user
 
 
-def _create_task(db, *, creator, assignee, title: str, day: date):
+def _create_task(
+    db,
+    *,
+    creator,
+    assignee,
+    title: str,
+    day: date | None = None,
+    due_date: date | None = None,
+    assignment_date: date | None = None,
+    effort_level: EffortLevel = EffortLevel.MEDIUM,
+):
+    due_value = due_date or day
+    assignment_value = assignment_date or day or due_value
+    if due_value is None or assignment_value is None:
+        raise ValueError("Task creation requires a due date and assignment date.")
+
     task = TaskService(db).create_unassigned_task(
         TaskCreate(
             title=title,
             description="Task description",
-            due_date=day,
-            effort_level=EffortLevel.MEDIUM,
-            ai_suggested_level=EffortLevel.MEDIUM,
+            due_date=due_value,
+            effort_level=effort_level,
+            ai_suggested_level=effort_level,
             ai_confidence=0.7,
             ai_reason="test",
             fallback_used=False,
@@ -66,7 +81,7 @@ def _create_task(db, *, creator, assignee, title: str, day: date):
         ),
         creator,
     )
-    TaskService(db).assign_task(task, assignee_id=assignee.id, assignment_date=day)
+    TaskService(db).assign_task(task, assignee_id=assignee.id, assignment_date=assignment_value)
     return task
 
 
@@ -241,6 +256,95 @@ def test_non_admin_day_view_can_toggle_between_team_and_mine():
         assert mine_response.status_code == 200
         assert "Toggle Mate" not in mine_response.text
         assert f"Other Task {token}" not in mine_response.text
+    finally:
+        db.close()
+
+
+def test_tasks_next_up_uses_assignment_date_for_mine_scope():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"next-up-mine-{token}@example.com",
+            full_name="Next Up Mine",
+            capacity=10,
+        )
+        tomorrow = date.today() + timedelta(days=1)
+        later_day = date.today() + timedelta(days=5)
+
+        planned_next = _create_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Planned Soon {token}",
+            due_date=date.today() + timedelta(days=7),
+            assignment_date=tomorrow,
+        )
+        _create_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Due Soon But Planned Later {token}",
+            due_date=tomorrow,
+            assignment_date=later_day,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get("/tasks?scope=mine&view=up_next")
+
+        assert response.status_code == 200
+        assert planned_next.title in response.text
+        assert f"Due Soon But Planned Later {token}" not in response.text
+        assert "planned for today or tomorrow" in response.text
+    finally:
+        db.close()
+
+
+def test_tasks_next_up_uses_assignment_date_for_team_scope():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"next-up-team-viewer-{token}@example.com",
+            full_name="Next Up Team Viewer",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"next-up-team-mate-{token}@example.com",
+            full_name="Next Up Team Mate",
+            capacity=10,
+        )
+        tomorrow = date.today() + timedelta(days=1)
+        later_day = date.today() + timedelta(days=6)
+
+        planned_next = _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Team Planned Soon {token}",
+            due_date=date.today() + timedelta(days=8),
+            assignment_date=tomorrow,
+        )
+        _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Team Due Soon But Planned Later {token}",
+            due_date=tomorrow,
+            assignment_date=later_day,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get("/tasks?scope=team&view=up_next")
+
+        assert response.status_code == 200
+        assert planned_next.title in response.text
+        assert f"Team Due Soon But Planned Later {token}" not in response.text
     finally:
         db.close()
 
