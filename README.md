@@ -19,6 +19,157 @@ Plan tasks without overload. Built-in workload limits, smart scheduling, recurri
 
 ---
 
+## Screenshots
+
+### Quick look
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="images/Dashboard.jpg">
+        <img src="images/Dashboard.jpg" width="260">
+      </a><br>
+      <sub>Dashboard overview</sub>
+    </td>
+    <td align="center">
+      <a href="images/Tasks_View.jpg">
+        <img src="images/Tasks_View.jpg" width="260">
+      </a><br>
+      <sub>Tasks overview</sub>
+    </td>
+    <td align="center">
+      <a href="images/Day_View.jpg">
+        <img src="images/Day_View.jpg" width="260">
+      </a><br>
+      <sub>Day view with workload planning</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="images/Day_View_Change_Date_On_A_Task_Blocked_Schedule.jpg">
+        <img src="images/Day_View_Change_Date_On_A_Task_Blocked_Schedule.jpg" width="260">
+      </a><br>
+      <sub>Blocked date with smart suggestion</sub>
+    </td>
+    <td align="center">
+      <a href="images/Create_Assign_Now.jpg">
+        <img src="images/Create_Assign_Now.jpg" width="260">
+      </a><br>
+      <sub>Create and assign in one flow</sub>
+    </td>
+    <td align="center">
+      <a href="images/Ask_AI_Chat.jpg">
+        <img src="images/Ask_AI_Chat.jpg" width="260">
+      </a><br>
+      <sub>Built-in assistant</sub>
+    </td>
+  </tr>
+</table>
+
+<details>
+  <summary><strong>View more screenshots ↓</strong></summary>
+  <br>
+
+  <h3>Additional task views</h3>
+
+  <table>
+    <tr>
+      <td align="center">
+        <a href="images/Tasks_View_In_Progress.jpg">
+          <img src="images/Tasks_View_In_Progress.jpg" width="240">
+        </a><br>
+        <sub>In progress tasks</sub>
+      </td>
+    </tr>
+  </table>
+
+  <h3>Task creation and recurring tasks</h3>
+
+  <table>
+    <tr>
+      <td align="center">
+        <a href="images/Create_Empty.jpg">
+          <img src="images/Create_Empty.jpg" width="240">
+        </a><br>
+        <sub>Task creation</sub>
+      </td>
+      <td align="center">
+        <a href="images/Create_Recurring_Task_Options.jpg">
+          <img src="images/Create_Recurring_Task_Options.jpg" width="240">
+        </a><br>
+        <sub>Recurring task options</sub>
+      </td>
+    </tr>
+  </table>
+
+  <h3>Scheduling details</h3>
+
+  <table>
+    <tr>
+      <td align="center">
+        <a href="images/Day_View_Change_Date_On_A_Task.jpg">
+          <img src="images/Day_View_Change_Date_On_A_Task.jpg" width="240">
+        </a><br>
+        <sub>Change task date</sub>
+      </td>
+    </tr>
+  </table>
+
+  <h3>Personalization</h3>
+
+  <table>
+    <tr>
+      <td align="center">
+        <a href="images/My_Appearance.jpg">
+          <img src="images/My_Appearance.jpg" width="240">
+        </a><br>
+        <sub>Appearance settings</sub>
+      </td>
+      <td align="center">
+        <a href="images/My_Schedule.jpg">
+          <img src="images/My_Schedule.jpg" width="240">
+        </a><br>
+        <sub>Schedule settings</sub>
+      </td>
+    </tr>
+  </table>
+
+  <h3>Admin settings</h3>
+
+  <table>
+    <tr>
+      <td align="center">
+        <a href="images/Admin_Settings_1.jpg">
+          <img src="images/Admin_Settings_1.jpg" width="240">
+        </a><br>
+        <sub>Admin controls</sub>
+      </td>
+      <td align="center">
+        <a href="images/Admin_Settings_2.jpg">
+          <img src="images/Admin_Settings_2.jpg" width="240">
+        </a><br>
+        <sub>AI and configuration</sub>
+      </td>
+    </tr>
+  </table>
+
+  <h3>Login</h3>
+
+  <table>
+    <tr>
+      <td align="center">
+        <a href="images/Login_Page.jpg">
+          <img src="images/Login_Page.jpg" width="240">
+        </a><br>
+        <sub>Login page</sub>
+      </td>
+    </tr>
+  </table>
+
+</details>
+
+---
+
 ## What this is
 
 A task manager for households and small teams.
