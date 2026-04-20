@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/storage/composite_local_store.dart';
+import '../data/storage/file_local_store.dart';
 import '../data/repositories/connection_repository.dart';
 import '../data/repositories/preferences_repository.dart';
 import '../data/repositories/saved_login_repository.dart';
@@ -35,13 +40,31 @@ class AppServices {
   final http.Client httpClient;
 
   static Future<AppServices> bootstrap() async {
-    late final LocalStore localStore;
+    final localStores = <LocalStore>[];
+
     try {
       final preferences = await SharedPreferences.getInstance();
-      localStore = SharedPreferencesStore(preferences);
+      localStores.add(SharedPreferencesStore(preferences));
     } catch (_) {
-      localStore = InMemoryLocalStore();
+      // Fall back to another local persistence backend if shared preferences fail.
     }
+
+    try {
+      final supportDirectory = await getApplicationSupportDirectory();
+      localStores.add(
+        FileLocalStore(
+          File('${supportDirectory.path}/homeflow_local_store.json'),
+        ),
+      );
+    } catch (_) {
+      // Fall back to in-memory storage if no durable local storage is available.
+    }
+
+    final LocalStore localStore = switch (localStores.length) {
+      0 => InMemoryLocalStore(),
+      1 => localStores.first,
+      _ => CompositeLocalStore(localStores),
+    };
 
     late final SecureStore secureStore;
     try {
@@ -51,7 +74,10 @@ class AppServices {
     }
 
     return AppServices(
-      connectionRepository: ConnectionRepository(localStore),
+      connectionRepository: ConnectionRepository(
+        localStore,
+        secureStore: secureStore,
+      ),
       savedLoginRepository: SavedLoginRepository(secureStore),
       sessionRepository: SessionRepository(secureStore),
       preferencesRepository: PreferencesRepository(localStore),
