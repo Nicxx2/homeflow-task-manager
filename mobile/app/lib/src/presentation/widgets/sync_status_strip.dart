@@ -55,7 +55,7 @@ class HeaderStatus {
   final StatusTone tone;
 
   factory HeaderStatus.fromController(AppController controller) {
-    if (controller.isSyncing) {
+    if (controller.isSyncing || controller.isRestoringSession) {
       return const HeaderStatus(label: 'Syncing', tone: StatusTone.neutral);
     }
     if (controller.needsReauth) {
@@ -89,7 +89,9 @@ class HeaderStatus {
           tone: StatusTone.warning,
         );
       case SyncResultStatus.authRequired:
-        return const HeaderStatus(label: 'Sign in', tone: StatusTone.danger);
+        return controller.needsReauth
+            ? const HeaderStatus(label: 'Sign in', tone: StatusTone.danger)
+            : const HeaderStatus(label: 'Cached', tone: StatusTone.warning);
       case SyncResultStatus.serverError:
       case SyncResultStatus.validationError:
       case SyncResultStatus.unknownError:

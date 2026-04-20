@@ -161,15 +161,46 @@ class _AppBootstrapScopeState extends State<_AppBootstrapScope> {
   }
 }
 
-class _HomeflowAppShell extends StatelessWidget {
+class _HomeflowAppShell extends StatefulWidget {
   const _HomeflowAppShell({required this.services});
 
   final AppServices services;
 
   @override
+  State<_HomeflowAppShell> createState() => _HomeflowAppShellState();
+}
+
+class _HomeflowAppShellState extends State<_HomeflowAppShell>
+    with WidgetsBindingObserver {
+  late final AppController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AppController(widget.services)..initialize();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+
+    _controller.handleAppResumed();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<AppController>(
-      create: (_) => AppController(services)..initialize(),
+    return ChangeNotifierProvider<AppController>.value(
+      value: _controller,
       child: Consumer<AppController>(
         builder: (context, controller, _) => MaterialApp(
           title: 'Homeflow Mobile',

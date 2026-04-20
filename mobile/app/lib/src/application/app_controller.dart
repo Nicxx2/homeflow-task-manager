@@ -32,11 +32,13 @@ class AppController extends ChangeNotifier {
   AppPreferences _preferences = AppPreferences.defaults();
   ConnectionSettings? _connectionSettings;
   AuthSession? _session;
+  SavedLogin? _savedLogin;
   TaskCacheSnapshot? _cacheSnapshot;
   String? _errorMessage;
   String? _initializationDiagnostics;
   bool _isInitializing = true;
   bool _isAuthenticating = false;
+  bool _isRestoringSession = false;
   bool _isSyncing = false;
   int _selectedTabIndex = 0;
   final Set<int> _updatingTaskIds = <int>{};
@@ -49,6 +51,7 @@ class AppController extends ChangeNotifier {
   String? get initializationDiagnostics => _initializationDiagnostics;
   bool get isInitializing => _isInitializing;
   bool get isAuthenticating => _isAuthenticating;
+  bool get isRestoringSession => _isRestoringSession;
   bool get isSyncing => _isSyncing;
   int get selectedTabIndex => _selectedTabIndex;
   DateTime? get cacheWindowStart => _cacheSnapshot?.windowStart;
@@ -66,6 +69,10 @@ class AppController extends ChangeNotifier {
 
   bool get hasAnyCache => _cacheSnapshot != null;
 
+  bool get hasSavedLogin => _savedLogin != null;
+
+  bool get hasActiveSession => _session != null && !(_session?.isExpired ?? true);
+
   bool get isShowingCachedData {
     final result =
         _cacheSnapshot?.lastSyncResult ?? SyncResultStatus.neverSynced;
@@ -73,6 +80,9 @@ class AppController extends ChangeNotifier {
   }
 
   bool get needsReauth {
+    if (_isRestoringSession || hasActiveSession || hasSavedLogin) {
+      return false;
+    }
     final result = _cacheSnapshot?.lastSyncResult;
     return result == SyncResultStatus.authRequired ||
         (_session?.isExpired ?? false);
@@ -244,7 +254,9 @@ class AppController extends ChangeNotifier {
       case SyncResultStatus.serverUnreachable:
         return 'Cannot reach your Homeflow server right now. Showing cached tasks.';
       case SyncResultStatus.authRequired:
-        return 'Sign in again to refresh tasks. Showing cached data if available.';
+        return hasSavedLogin || hasActiveSession
+            ? 'Session will refresh automatically. Showing cached tasks for now.'
+            : 'Sign in again to refresh tasks. Showing cached data if available.';
       case SyncResultStatus.serverError:
         return 'Server returned an error. Showing cached tasks from your last sync.';
       case SyncResultStatus.validationError:
@@ -255,7 +267,7 @@ class AppController extends ChangeNotifier {
   }
 
   String get syncBannerTitle {
-    if (_isSyncing) {
+    if (_isSyncing || _isRestoringSession) {
       return 'Refreshing tasks';
     }
     if (needsReauth) {
@@ -275,7 +287,7 @@ class AppController extends ChangeNotifier {
       case SyncResultStatus.serverUnreachable:
         return 'Server unreachable';
       case SyncResultStatus.authRequired:
-        return 'Sign in again required';
+        return needsReauth ? 'Sign in again required' : 'Refresh needed';
       case SyncResultStatus.serverError:
         return 'Server error';
       case SyncResultStatus.validationError:
@@ -290,7 +302,7 @@ class AppController extends ChangeNotifier {
   }
 
   bool get syncBannerIsWarning {
-    if (_isSyncing) {
+    if (_isSyncing || _isRestoringSession) {
       return false;
     }
     final snapshot = _cacheSnapshot;
@@ -301,7 +313,7 @@ class AppController extends ChangeNotifier {
   }
 
   bool get syncBannerIsError {
-    if (_isSyncing) {
+    if (_isSyncing || _isRestoringSession) {
       return false;
     }
     if (needsReauth) {
@@ -311,7 +323,8 @@ class AppController extends ChangeNotifier {
     if (snapshot == null) {
       return _errorMessage != null;
     }
-    return snapshot.lastSyncResult == SyncResultStatus.authRequired ||
+    return (snapshot.lastSyncResult == SyncResultStatus.authRequired &&
+            needsReauth) ||
         snapshot.lastSyncResult == SyncResultStatus.serverError ||
         snapshot.lastSyncResult == SyncResultStatus.validationError;
   }
@@ -400,6 +413,7 @@ class AppController extends ChangeNotifier {
     try {
       _preferences = await _services.preferencesRepository.load();
       _connectionSettings = await _services.connectionRepository.load();
+      _savedLogin = await _services.savedLoginRepository.load();
       _session = await _services.sessionRepository.load();
 
       final settings = _connectionSettings;
@@ -489,6 +503,7 @@ class AppController extends ChangeNotifier {
 
     try {
       await client.testConnection();
+      final savedLogin = SavedLogin(email: email.trim(), password: password);
       final session = await client.login(
         email: email.trim(),
         password: password,
@@ -496,10 +511,9 @@ class AppController extends ChangeNotifier {
 
       await _services.connectionRepository.save(settings);
       await _services.sessionRepository.save(session);
-      await _services.savedLoginRepository.save(
-        SavedLogin(email: email.trim(), password: password),
-      );
+      await _services.savedLoginRepository.save(savedLogin);
       _connectionSettings = settings;
+      _savedLogin = savedLogin;
       _session = session;
       _cacheSnapshot = await _services.taskCacheRepository.load(
         serverBaseUrl: settings.baseUrl,
@@ -562,6 +576,31 @@ class AppController extends ChangeNotifier {
       }
     }
     _isSyncing = false;
+    await _persistWidgetSnapshot();
+    await _syncScheduledTaskReminders();
+    notifyListeners();
+  }
+
+  Future<void> handleAppResumed() async {
+    if (_isInitializing || _isAuthenticating || _isSyncing) {
+      return;
+    }
+
+    final settings = _connectionSettings;
+    if (settings == null) {
+      return;
+    }
+
+    final restoredSession = await _ensureActiveSession(
+      allowCachedSession: true,
+      forceRefresh: _cacheSnapshot?.lastSyncResult == SyncResultStatus.authRequired,
+    );
+
+    if (_preferences.autoRefreshOnOpen && restoredSession != null) {
+      await refreshTasks();
+      return;
+    }
+
     await _persistWidgetSnapshot();
     await _syncScheduledTaskReminders();
     notifyListeners();
@@ -653,6 +692,7 @@ class AppController extends ChangeNotifier {
     }
     await _services.sessionRepository.clear();
     await _services.savedLoginRepository.clear();
+    _savedLogin = null;
     _session = null;
     _cacheSnapshot = null;
     _selectedTabIndex = 0;
@@ -676,7 +716,8 @@ class AppController extends ChangeNotifier {
       return currentSession;
     }
 
-    final savedLogin = await _services.savedLoginRepository.load();
+    final savedLogin = _savedLogin ?? await _services.savedLoginRepository.load();
+    _savedLogin = savedLogin;
     if (savedLogin == null) {
       if (!allowCachedSession) {
         _session = currentSession;
@@ -686,6 +727,8 @@ class AppController extends ChangeNotifier {
           : null;
     }
 
+    _isRestoringSession = true;
+    notifyListeners();
     try {
       final refreshedSession = await _signInWithSavedLogin(
         settings,
@@ -699,12 +742,16 @@ class AppController extends ChangeNotifier {
       if (error.type == ApiErrorType.invalidCredentials) {
         await _services.savedLoginRepository.clear();
         await _services.sessionRepository.clear();
+        _savedLogin = null;
         _session = null;
       }
       _errorMessage = error.message;
       return currentSession != null && !currentSession.isExpired
           ? currentSession
           : null;
+    } finally {
+      _isRestoringSession = false;
+      notifyListeners();
     }
   }
 
@@ -845,6 +892,7 @@ class AppController extends ChangeNotifier {
       return TodayWidgetState.error;
     }
     if (isDataStale ||
+        snapshot.lastSyncResult == SyncResultStatus.authRequired ||
         snapshot.lastSyncResult == SyncResultStatus.networkUnavailable ||
         snapshot.lastSyncResult == SyncResultStatus.serverUnreachable ||
         snapshot.lastSyncResult == SyncResultStatus.unknownError ||
@@ -897,7 +945,9 @@ class AppController extends ChangeNotifier {
       case SyncResultStatus.serverUnreachable:
         return 'Server unreachable. Showing cached tasks.';
       case SyncResultStatus.authRequired:
-        return 'Sign in again to refresh tasks.';
+        return hasSavedLogin || hasActiveSession
+            ? 'Session will refresh automatically. Showing cached tasks.'
+            : 'Sign in again to refresh tasks.';
       case SyncResultStatus.serverError:
         return 'Server error. Showing cached tasks.';
       case SyncResultStatus.validationError:
@@ -938,9 +988,7 @@ class AppController extends ChangeNotifier {
     }
 
     try {
-      if (!_preferences.dailyReminderEnabled ||
-          _session == null ||
-          _cacheSnapshot == null) {
+      if (!_preferences.dailyReminderEnabled || _cacheSnapshot == null) {
         await TaskNotificationBridge.cancelTaskNotifications();
         return;
       }

@@ -5,4 +5,3 @@
 build/
 coverage/
 ios/Flutter/Flutter.podspec
-pubspec.lock

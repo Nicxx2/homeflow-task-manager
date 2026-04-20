@@ -17,6 +17,7 @@ env/
 
 # Flutter / Android local build output
 mobile/app/.dart_tool/
+mobile/app/.build-cache/
 mobile/app/.idea/
 mobile/app/build/
 mobile/app/.flutter-plugins
