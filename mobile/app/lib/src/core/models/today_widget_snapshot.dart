@@ -30,13 +30,16 @@ class TodayWidgetSnapshot {
   });
 
   factory TodayWidgetSnapshot.fromJson(Map<String, dynamic> json) {
-    final rawTitles = json['task_titles'] as List<dynamic>? ?? const <dynamic>[];
+    final rawTitles =
+        json['task_titles'] as List<dynamic>? ?? const <dynamic>[];
     return TodayWidgetSnapshot(
       state: TodayWidgetState.fromValue(json['state'] as String?),
       title: json['title'] as String? ?? 'Today',
       subtitle: json['subtitle'] as String? ?? '',
       taskCount: json['task_count'] as int? ?? 0,
-      taskTitles: rawTitles.map((item) => item as String).toList(growable: false),
+      taskTitles: rawTitles
+          .map((item) => item as String)
+          .toList(growable: false),
       isStale: json['is_stale'] as bool? ?? false,
       actionRoute: json['action_route'] as String? ?? '/',
       generatedAt: DateTime.parse(json['generated_at'] as String).toUtc(),

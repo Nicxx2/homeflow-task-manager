@@ -7,10 +7,7 @@ import '../data/api/homeflow_api_client.dart';
 import '../data/repositories/task_cache_repository.dart';
 
 class SyncOutcome {
-  const SyncOutcome({
-    required this.snapshot,
-    this.error,
-  });
+  const SyncOutcome({required this.snapshot, this.error});
 
   final TaskCacheSnapshot snapshot;
   final ApiException? error;
@@ -34,9 +31,13 @@ class SyncCoordinator {
     TaskCacheSnapshot? previousSnapshot,
   }) async {
     final client = clientFactory(connectionSettings.baseUrl);
-    final startDate = _dateOnly(DateTime.now().toUtc().subtract(const Duration(days: 1)));
+    final startDate = _dateOnly(
+      DateTime.now().toUtc().subtract(const Duration(days: 1)),
+    );
     final endDate = _dateOnly(
-      DateTime.now().toUtc().add(Duration(days: preferences.offlineTaskWindow.days)),
+      DateTime.now().toUtc().add(
+        Duration(days: preferences.offlineTaskWindow.days),
+      ),
     );
 
     try {
@@ -79,7 +80,9 @@ class SyncCoordinator {
   }) {
     final now = DateTime.now().toUtc();
     final startDate = _dateOnly(now.subtract(const Duration(days: 1)));
-    final endDate = _dateOnly(now.add(Duration(days: preferences.offlineTaskWindow.days)));
+    final endDate = _dateOnly(
+      now.add(Duration(days: preferences.offlineTaskWindow.days)),
+    );
     return TaskCacheSnapshot(
       serverBaseUrl: connectionSettings.baseUrl,
       userEmail: session.user.email,

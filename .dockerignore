@@ -11,6 +11,9 @@ __pycache__
 *.pyd
 
 .gradle-build-cache
+.gradle
+.pub-cache
+.tmp
 .dart_tool
 mobile
 build

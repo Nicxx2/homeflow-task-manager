@@ -4,9 +4,10 @@ import 'package:provider/provider.dart';
 
 import '../../application/app_controller.dart';
 import '../../core/app_release.dart';
+import '../../core/date_display.dart';
 import '../../core/models/app_preferences.dart';
 import '../../core/models/mobile_task.dart';
-import '../widgets/sync_status_banner.dart';
+import '../widgets/sync_status_strip.dart';
 import '../widgets/task_preview_list.dart';
 import 'task_detail_shell_screen.dart';
 
@@ -25,32 +26,42 @@ class HomeShellScreen extends StatelessWidget {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Homeflow Mobile'),
+            title: const Text('Homeflow'),
             actions: [
-              IconButton(
-                onPressed: controller.canRetrySync ? controller.refreshTasks : null,
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh',
-              ),
+              if (controller.isSyncing)
+                const Padding(
+                  padding: EdgeInsets.only(right: 20),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  ),
+                )
+              else
+                IconButton(
+                  onPressed:
+                      controller.canRetrySync ? controller.refreshTasks : null,
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Refresh',
+                ),
             ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(44),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: SyncStatusStrip(controller: controller),
+              ),
+            ),
           ),
           body: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SyncStatusBanner(
-                    title: controller.syncBannerTitle,
-                    message: controller.syncStatusMessage,
-                    isWarning: controller.syncBannerIsWarning,
-                    isError: controller.syncBannerIsError,
-                    actionLabel: controller.canRetrySync ? controller.syncBannerActionLabel : null,
-                    onAction: controller.canRetrySync ? controller.refreshTasks : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(child: pages[controller.selectedTabIndex]),
-                ],
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: KeyedSubtree(
+                  key: ValueKey<int>(controller.selectedTabIndex),
+                  child: pages[controller.selectedTabIndex],
+                ),
               ),
             ),
           ),
@@ -58,9 +69,18 @@ class HomeShellScreen extends StatelessWidget {
             selectedIndex: controller.selectedTabIndex,
             onDestinationSelected: controller.selectTab,
             destinations: const [
-              NavigationDestination(icon: Icon(Icons.today_outlined), label: 'Today'),
-              NavigationDestination(icon: Icon(Icons.view_agenda_outlined), label: 'Upcoming'),
-              NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+              NavigationDestination(
+                icon: Icon(Icons.today_outlined),
+                label: 'Today',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.view_agenda_outlined),
+                label: 'Upcoming',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                label: 'Settings',
+              ),
             ],
           ),
         );
@@ -69,78 +89,87 @@ class HomeShellScreen extends StatelessWidget {
   }
 }
 
-class _TodayTab extends StatelessWidget {
+enum _TodaySection { active, completed }
+
+class _TodayTab extends StatefulWidget {
   const _TodayTab();
+
+  @override
+  State<_TodayTab> createState() => _TodayTabState();
+}
+
+class _TodayTabState extends State<_TodayTab> {
+  _TodaySection _selectedSection = _TodaySection.active;
 
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<AppController>();
     final tasks = controller.todayTasks;
-    final activeTasks = tasks.where((task) => !task.isCompleted).toList(growable: false);
-    final completedTasks = tasks.where((task) => task.isCompleted).toList(growable: false);
+    final activeTasks =
+        tasks.where((task) => !task.isCompleted).toList(growable: false);
+    final completedTasks =
+        tasks.where((task) => task.isCompleted).toList(growable: false);
+    final visibleTasks =
+        _selectedSection == _TodaySection.active ? activeTasks : completedTasks;
     final now = DateTime.now().toUtc();
     final today = DateTime.utc(now.year, now.month, now.day);
+    final emptyMessage = _selectedSection == _TodaySection.active
+        ? (completedTasks.isNotEmpty
+            ? 'No active tasks remain for today.'
+            : controller.messageForDay(today))
+        : 'No tasks have been completed today yet.';
 
     return ListView(
       children: [
+        Text('Today', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 4),
         Text(
-          'Today',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Fast status updates and a clear view of what still needs attention.',
+          '${DateFormat('EEEE, dd MMM').format(DateTime.now())}  |  ${activeTasks.length} active  |  ${completedTasks.length} completed',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
-        _SummaryRow(
-          activeCount: activeTasks.length,
-          completedCount: completedTasks.length,
+        SegmentedButton<_TodaySection>(
+          showSelectedIcon: false,
+          segments: [
+            ButtonSegment<_TodaySection>(
+              value: _TodaySection.active,
+              label: Text('Active ${activeTasks.length}'),
+            ),
+            ButtonSegment<_TodaySection>(
+              value: _TodaySection.completed,
+              label: Text('Completed ${completedTasks.length}'),
+            ),
+          ],
+          selected: <_TodaySection>{_selectedSection},
+          onSelectionChanged: (selection) {
+            if (selection.isNotEmpty) {
+              setState(() {
+                _selectedSection = selection.first;
+              });
+            }
+          },
         ),
         const SizedBox(height: 16),
-        Text(
-          activeTasks.isEmpty ? 'No active tasks' : 'Active tasks',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        TaskPreviewList(
-          tasks: activeTasks,
-          emptyMessage: completedTasks.isNotEmpty
-              ? 'No active tasks remain for today.'
-              : controller.messageForDay(today),
-          isUpdatingTask: controller.isUpdatingTask,
-          onStatusSelected: controller.canChangeTaskStatus
-              ? (task, status) async {
-                  await controller.updateTaskStatus(taskId: task.id, status: status);
-                }
-              : null,
-          onTaskTap: (task) => Navigator.of(context).pushNamed(
-            TaskDetailShellScreen.routeName,
-            arguments: task.id,
-          ),
-        ),
-        if (completedTasks.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            'Completed today',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          TaskPreviewList(
-            tasks: completedTasks,
-            emptyMessage: '',
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: TaskPreviewList(
+            key: ValueKey<_TodaySection>(_selectedSection),
+            tasks: visibleTasks,
+            emptyMessage: emptyMessage,
             isUpdatingTask: controller.isUpdatingTask,
             onStatusSelected: controller.canChangeTaskStatus
                 ? (task, status) async {
-                    await controller.updateTaskStatus(taskId: task.id, status: status);
+                    await controller.updateTaskStatus(
+                      taskId: task.id,
+                      status: status,
+                    );
                   }
                 : null,
-            onTaskTap: (task) => Navigator.of(context).pushNamed(
-              TaskDetailShellScreen.routeName,
-              arguments: task.id,
-            ),
+            onTaskTap: (task) => Navigator.of(
+              context,
+            ).pushNamed(TaskDetailShellScreen.routeName, arguments: task.id),
           ),
-        ],
+        ),
       ],
     );
   }
@@ -154,15 +183,16 @@ class _UpcomingTab extends StatelessWidget {
     final controller = context.watch<AppController>();
     final days = controller.upcomingDays;
     final now = DateTime.now().toUtc();
-    final tomorrow = DateTime.utc(now.year, now.month, now.day).add(const Duration(days: 1));
+    final tomorrow = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+    ).add(const Duration(days: 1));
 
     return ListView(
       children: [
-        Text(
-          'Upcoming',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 6),
+        Text('Upcoming', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 4),
         Text(
           controller.upcomingCoverageMessage(),
           style: Theme.of(context).textTheme.bodyMedium,
@@ -175,12 +205,14 @@ class _UpcomingTab extends StatelessWidget {
               child: Text(controller.messageForDay(tomorrow)),
             ),
           ),
-        for (final day in days) ...[
-          _UpcomingDaySection(
-            day: day,
-            tasks: controller.tasksForDate(day)
+        for (var index = 0; index < days.length; index++) ...[
+          _UpcomingDayCard(
+            day: days[index],
+            tasks: controller
+                .tasksForDate(days[index])
                 .where((task) => task.displayBucket == 'upcoming')
                 .toList(growable: false),
+            initiallyExpanded: index == 0,
           ),
           const SizedBox(height: 12),
         ],
@@ -189,42 +221,56 @@ class _UpcomingTab extends StatelessWidget {
   }
 }
 
-class _UpcomingDaySection extends StatelessWidget {
-  const _UpcomingDaySection({
+class _UpcomingDayCard extends StatelessWidget {
+  const _UpcomingDayCard({
     required this.day,
     required this.tasks,
+    required this.initiallyExpanded,
   });
 
   final DateTime day;
   final List<MobileTask> tasks;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<AppController>();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          DateFormat('EEEE, dd MMM').format(day.toLocal()),
+    final countLabel = tasks.isEmpty
+        ? 'No cached tasks'
+        : tasks.length == 1
+            ? '1 task'
+            : '${tasks.length} tasks';
+
+    return Card(
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        initiallyExpanded: initiallyExpanded && tasks.isNotEmpty,
+        title: Text(
+          formatDateOnlyLabel(day, 'EEEE, dd MMM'),
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        const SizedBox(height: 8),
-        TaskPreviewList(
-          tasks: tasks,
-          emptyMessage: controller.messageForDay(day),
-          showAssignmentDate: true,
-          isUpdatingTask: controller.isUpdatingTask,
-          onStatusSelected: controller.canChangeTaskStatus
-              ? (task, status) async {
-                  await controller.updateTaskStatus(taskId: task.id, status: status);
-                }
-              : null,
-          onTaskTap: (task) => Navigator.of(context).pushNamed(
-            TaskDetailShellScreen.routeName,
-            arguments: task.id,
+        subtitle: Text(countLabel),
+        children: [
+          TaskPreviewList(
+            tasks: tasks,
+            emptyMessage: controller.messageForDay(day),
+            showAssignmentDate: true,
+            isUpdatingTask: controller.isUpdatingTask,
+            onStatusSelected: controller.canChangeTaskStatus
+                ? (task, status) async {
+                    await controller.updateTaskStatus(
+                      taskId: task.id,
+                      status: status,
+                    );
+                  }
+                : null,
+            onTaskTap: (task) => Navigator.of(
+              context,
+            ).pushNamed(TaskDetailShellScreen.routeName, arguments: task.id),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -236,6 +282,12 @@ class _SettingsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = context.watch<AppController>();
     final lastSync = controller.cacheSnapshot?.lastSuccessfulSyncAt;
+    final reminderMinutes =
+        controller.preferences.dailyReminderMinutesAfterMidnight;
+    final reminderTime = TimeOfDay(
+      hour: reminderMinutes ~/ 60,
+      minute: reminderMinutes % 60,
+    );
 
     return ListView(
       children: [
@@ -247,10 +299,7 @@ class _SettingsTab extends StatelessWidget {
           title: 'Account',
           value: controller.currentUserEmail ?? 'Signed out',
         ),
-        const _SettingsCard(
-          title: 'App version',
-          value: appReleaseLabel,
-        ),
+        const _SettingsCard(title: 'App version', value: appReleaseLabel),
         _SettingsCard(
           title: 'Last sync status',
           value: controller.syncStatusMessage,
@@ -263,9 +312,60 @@ class _SettingsTab extends StatelessWidget {
         ),
         _SettingsCard(
           title: 'Cached window',
-          value: controller.cacheWindowStart == null || controller.cacheWindowEnd == null
+          value: controller.cacheWindowStart == null ||
+                  controller.cacheWindowEnd == null
               ? 'No cached window yet'
-              : '${DateFormat('dd MMM').format(controller.cacheWindowStart!.toLocal())} to ${DateFormat('dd MMM').format(controller.cacheWindowEnd!.toLocal())}',
+              : '${formatDateOnlyLabel(controller.cacheWindowStart!, 'dd MMM')} to ${formatDateOnlyLabel(controller.cacheWindowEnd!, 'dd MMM')}',
+        ),
+        Card(
+          child: ExpansionTile(
+            title: const Text('Notifications'),
+            subtitle: Text(
+              controller.preferences.dailyReminderEnabled
+                  ? 'Daily at ${reminderTime.format(context)}'
+                  : 'Off',
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Daily reminder'),
+                subtitle: const Text(
+                  'Only send a reminder on days that already have active tasks in the cache.',
+                ),
+                value: controller.preferences.dailyReminderEnabled,
+                onChanged: controller.setDailyReminderEnabled,
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                enabled: controller.preferences.dailyReminderEnabled,
+                title: const Text('Reminder time'),
+                subtitle: Text(reminderTime.format(context)),
+                trailing: const Icon(Icons.schedule_outlined),
+                onTap: !controller.preferences.dailyReminderEnabled
+                    ? null
+                    : () async {
+                        final picked = await showTimePicker(
+                          context: context,
+                          initialTime: reminderTime,
+                        );
+                        if (picked != null && context.mounted) {
+                          await controller.setDailyReminderMinutesAfterMidnight(
+                            (picked.hour * 60) + picked.minute,
+                          );
+                        }
+                      },
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Reminders use the app cache, so the message stays simple and works offline.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
         ),
         Card(
           child: Padding(
@@ -321,7 +421,9 @@ class _SettingsTab extends StatelessWidget {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Auto refresh on app open'),
-                  subtitle: const Text('Refresh the rolling cache window when the app opens.'),
+                  subtitle: const Text(
+                    'Refresh the rolling cache window when the app opens.',
+                  ),
                   value: controller.preferences.autoRefreshOnOpen,
                   onChanged: controller.setAutoRefreshOnOpen,
                 ),
@@ -340,20 +442,14 @@ class _SettingsTab extends StatelessWidget {
           child: const Text('Clear cached data'),
         ),
         const SizedBox(height: 8),
-        FilledButton(
-          onPressed: controller.logout,
-          child: const Text('Logout'),
-        ),
+        FilledButton(onPressed: controller.logout, child: const Text('Logout')),
       ],
     );
   }
 }
 
 class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({
-    required this.title,
-    required this.value,
-  });
+  const _SettingsCard({required this.title, required this.value});
 
   final String title;
   final String value;
@@ -361,73 +457,7 @@ class _SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: ListTile(
-        title: Text(title),
-        subtitle: Text(value),
-      ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.activeCount,
-    required this.completedCount,
-  });
-
-  final int activeCount;
-  final int completedCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _SummaryTile(
-            label: 'Active',
-            value: activeCount.toString(),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _SummaryTile(
-            label: 'Completed',
-            value: completedCount.toString(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SummaryTile extends StatelessWidget {
-  const _SummaryTile({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            value,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 4),
-          Text(label),
-        ],
-      ),
+      child: ListTile(title: Text(title), subtitle: Text(value)),
     );
   }
 }

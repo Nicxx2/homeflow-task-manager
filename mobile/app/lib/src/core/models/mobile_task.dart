@@ -102,7 +102,9 @@ class MobileTask {
       'description': description,
       'status': status.value,
       'due_date': formatDateOnly(dueDate),
-      'assignment_date': assignmentDate == null ? null : formatDateOnly(assignmentDate!),
+      'assignment_date': assignmentDate == null
+          ? null
+          : formatDateOnly(assignmentDate!),
       'assignee_id': assigneeId,
       'effort_level': effortLevel.value,
       'points_value': pointsValue,

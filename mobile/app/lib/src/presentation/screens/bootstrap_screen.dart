@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../application/app_controller.dart';
 import 'connection_shell_screen.dart';
 import 'home_shell_screen.dart';
+import '../widgets/startup_failure_view.dart';
 
 class BootstrapScreen extends StatelessWidget {
   const BootstrapScreen({super.key});
@@ -14,14 +15,22 @@ class BootstrapScreen extends StatelessWidget {
       builder: (context, controller, _) {
         if (controller.isInitializing) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 
         if (controller.isAuthenticated) {
           return const HomeShellScreen();
+        }
+
+        if (controller.hasInitializationFailure) {
+          return StartupFailureView(
+            title: 'App startup failed',
+            message:
+                'Homeflow could not finish loading on this device. Try again to continue.',
+            diagnostics: controller.initializationDiagnostics,
+            onRetry: controller.initialize,
+          );
         }
 
         return const ConnectionShellScreen();

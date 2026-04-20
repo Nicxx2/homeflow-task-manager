@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:intl/intl.dart';
 
+import '../core/app_release.dart';
+import '../core/date_display.dart';
 import '../core/models/app_preferences.dart';
 import '../core/models/auth_session.dart';
 import '../core/models/connection_settings.dart';
@@ -11,6 +12,7 @@ import '../core/models/today_widget_snapshot.dart';
 import '../data/api/api_exception.dart';
 import '../data/api/homeflow_api_client.dart';
 import '../platform/android_widget_bridge.dart';
+import '../platform/task_notification_bridge.dart';
 import 'app_services.dart';
 import 'sync_coordinator.dart';
 
@@ -32,6 +34,7 @@ class AppController extends ChangeNotifier {
   AuthSession? _session;
   TaskCacheSnapshot? _cacheSnapshot;
   String? _errorMessage;
+  String? _initializationDiagnostics;
   bool _isInitializing = true;
   bool _isAuthenticating = false;
   bool _isSyncing = false;
@@ -43,6 +46,7 @@ class AppController extends ChangeNotifier {
   AuthSession? get session => _session;
   TaskCacheSnapshot? get cacheSnapshot => _cacheSnapshot;
   String? get errorMessage => _errorMessage;
+  String? get initializationDiagnostics => _initializationDiagnostics;
   bool get isInitializing => _isInitializing;
   bool get isAuthenticating => _isAuthenticating;
   bool get isSyncing => _isSyncing;
@@ -52,6 +56,7 @@ class AppController extends ChangeNotifier {
   AppThemeMode get themeModePreference => _preferences.themeMode;
 
   bool get isAuthenticated => _session != null;
+  bool get hasInitializationFailure => _initializationDiagnostics != null;
 
   String? get currentBaseUrl => _connectionSettings?.baseUrl;
 
@@ -62,13 +67,15 @@ class AppController extends ChangeNotifier {
   bool get hasAnyCache => _cacheSnapshot != null;
 
   bool get isShowingCachedData {
-    final result = _cacheSnapshot?.lastSyncResult ?? SyncResultStatus.neverSynced;
+    final result =
+        _cacheSnapshot?.lastSyncResult ?? SyncResultStatus.neverSynced;
     return result != SyncResultStatus.success && hasCachedTasks;
   }
 
   bool get needsReauth {
     final result = _cacheSnapshot?.lastSyncResult;
-    return result == SyncResultStatus.authRequired || (_session?.isExpired ?? false);
+    return result == SyncResultStatus.authRequired ||
+        (_session?.isExpired ?? false);
   }
 
   bool get canRetrySync {
@@ -95,7 +102,8 @@ class AppController extends ChangeNotifier {
       return snapshot.lastSyncResult != SyncResultStatus.success;
     }
     final age = DateTime.now().toUtc().difference(lastSuccess);
-    return snapshot.lastSyncResult != SyncResultStatus.success || age > const Duration(hours: 6);
+    return snapshot.lastSyncResult != SyncResultStatus.success ||
+        age > const Duration(hours: 6);
   }
 
   List<MobileTask> get todayTasks {
@@ -118,11 +126,14 @@ class AppController extends ChangeNotifier {
 
   List<MobileTask> get upcomingTasks {
     final tasks = _cacheSnapshot?.tasks ?? const <MobileTask>[];
-    return tasks.where((task) => task.displayBucket == 'upcoming').toList(growable: false);
+    return tasks
+        .where((task) => task.displayBucket == 'upcoming')
+        .toList(growable: false);
   }
 
   Map<DateTime, List<MobileTask>> get groupedUpcomingTasks {
-    final Map<DateTime, List<MobileTask>> grouped = <DateTime, List<MobileTask>>{};
+    final Map<DateTime, List<MobileTask>> grouped =
+        <DateTime, List<MobileTask>>{};
     for (final task in upcomingTasks) {
       final day = _dateOnly(task.assignmentDate ?? task.dueDate);
       grouped.putIfAbsent(day, () => <MobileTask>[]).add(task);
@@ -135,9 +146,15 @@ class AppController extends ChangeNotifier {
 
   List<DateTime> get upcomingDays {
     final now = DateTime.now().toUtc();
-    final tomorrow = DateTime.utc(now.year, now.month, now.day).add(const Duration(days: 1));
+    final tomorrow = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+    ).add(const Duration(days: 1));
     final snapshot = _cacheSnapshot;
-    final maxDays = preferences.offlineTaskWindow.days < 5 ? preferences.offlineTaskWindow.days : 5;
+    final maxDays = preferences.offlineTaskWindow.days < 5
+        ? preferences.offlineTaskWindow.days
+        : 5;
     if (snapshot == null) {
       return List<DateTime>.generate(
         maxDays,
@@ -146,9 +163,10 @@ class AppController extends ChangeNotifier {
       );
     }
 
-    final lastDay = snapshot.windowEnd.isBefore(tomorrow.add(Duration(days: maxDays - 1)))
-        ? snapshot.windowEnd
-        : tomorrow.add(Duration(days: maxDays - 1));
+    final lastDay =
+        snapshot.windowEnd.isBefore(tomorrow.add(Duration(days: maxDays - 1)))
+            ? snapshot.windowEnd
+            : tomorrow.add(Duration(days: maxDays - 1));
     final days = <DateTime>[];
     var current = tomorrow;
     while (!current.isAfter(lastDay)) {
@@ -173,7 +191,8 @@ class AppController extends ChangeNotifier {
       return false;
     }
     final target = _dateOnly(day);
-    return !target.isBefore(snapshot.windowStart) && !target.isAfter(snapshot.windowEnd);
+    return !target.isBefore(snapshot.windowStart) &&
+        !target.isAfter(snapshot.windowEnd);
   }
 
   String upcomingCoverageMessage() {
@@ -181,21 +200,22 @@ class AppController extends ChangeNotifier {
     if (snapshot == null) {
       return 'No cached upcoming days are available yet.';
     }
-    final start = DateFormat('dd MMM').format(snapshot.windowStart.toLocal());
-    final end = DateFormat('dd MMM').format(snapshot.windowEnd.toLocal());
+    final start = formatDateOnlyLabel(snapshot.windowStart, 'dd MMM');
+    final end = formatDateOnlyLabel(snapshot.windowEnd, 'dd MMM');
     return 'Cached window: $start to $end.';
   }
 
   String messageForDay(DateTime day) {
     if (!isDayCached(day)) {
       if (needsReauth) {
-        return 'No cached tasks available for ${DateFormat('EEEE').format(day.toLocal()).toLowerCase()} yet. Sign in again to refresh this day.';
+        return 'No cached tasks available for ${formatWeekdayLabelLower(day)} yet. Sign in again to refresh this day.';
       }
       final result = _cacheSnapshot?.lastSyncResult;
-      if (result == SyncResultStatus.serverUnreachable || result == SyncResultStatus.networkUnavailable) {
-        return 'No cached tasks available for ${DateFormat('EEEE').format(day.toLocal()).toLowerCase()} yet because the server could not be reached.';
+      if (result == SyncResultStatus.serverUnreachable ||
+          result == SyncResultStatus.networkUnavailable) {
+        return 'No cached tasks available for ${formatWeekdayLabelLower(day)} yet because the server could not be reached.';
       }
-      return 'No cached tasks available for ${DateFormat('EEEE').format(day.toLocal()).toLowerCase()} yet.';
+      return 'No cached tasks available for ${formatWeekdayLabelLower(day)} yet.';
     }
     return 'No tasks for this day in the current cache window.';
   }
@@ -359,6 +379,7 @@ class AppController extends ChangeNotifier {
       _cacheSnapshot = updatedSnapshot;
       await _services.taskCacheRepository.save(updatedSnapshot);
       await _persistWidgetSnapshot();
+      await _syncScheduledTaskReminders();
       notifyListeners();
       return true;
     } on ApiException catch (error) {
@@ -373,6 +394,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize() async {
     _isInitializing = true;
+    _initializationDiagnostics = null;
     notifyListeners();
 
     try {
@@ -389,13 +411,29 @@ class AppController extends ChangeNotifier {
         );
       }
 
-      final restoredSession = await _ensureActiveSession(allowCachedSession: true);
-      if (settings != null && restoredSession != null && _preferences.autoRefreshOnOpen) {
+      final restoredSession = await _ensureActiveSession(
+        allowCachedSession: true,
+      );
+      if (settings != null &&
+          restoredSession != null &&
+          _preferences.autoRefreshOnOpen) {
         await refreshTasks();
+      } else {
+        await _syncScheduledTaskReminders();
       }
+    } catch (error, stackTrace) {
+      _errorMessage = 'Homeflow could not finish loading on this device.';
+      _initializationDiagnostics = _buildInitializationDiagnostics(
+        error,
+        stackTrace,
+      );
     } finally {
       _isInitializing = false;
-      await _persistWidgetSnapshot();
+      try {
+        await _persistWidgetSnapshot();
+      } catch (_) {
+        // Widget sync should never block the main app from opening.
+      }
       notifyListeners();
     }
   }
@@ -525,12 +563,14 @@ class AppController extends ChangeNotifier {
     }
     _isSyncing = false;
     await _persistWidgetSnapshot();
+    await _syncScheduledTaskReminders();
     notifyListeners();
   }
 
   Future<void> updateOfflineWindow(OfflineTaskWindow value) async {
     _preferences = _preferences.copyWith(offlineTaskWindow: value);
     await _services.preferencesRepository.save(_preferences);
+    await _syncScheduledTaskReminders();
     notifyListeners();
     if (isAuthenticated) {
       await refreshTasks();
@@ -540,6 +580,41 @@ class AppController extends ChangeNotifier {
   Future<void> setAutoRefreshOnOpen(bool value) async {
     _preferences = _preferences.copyWith(autoRefreshOnOpen: value);
     await _services.preferencesRepository.save(_preferences);
+    notifyListeners();
+  }
+
+  Future<void> setDailyReminderEnabled(bool value) async {
+    if (value == _preferences.dailyReminderEnabled) {
+      return;
+    }
+
+    if (value) {
+      final granted = await TaskNotificationBridge.requestPermission();
+      if (!granted) {
+        _errorMessage =
+            'Notifications are disabled for this app on this device.';
+        notifyListeners();
+        return;
+      }
+    }
+
+    _preferences = _preferences.copyWith(dailyReminderEnabled: value);
+    await _services.preferencesRepository.save(_preferences);
+    await _syncScheduledTaskReminders();
+    notifyListeners();
+  }
+
+  Future<void> setDailyReminderMinutesAfterMidnight(int value) async {
+    final normalized = value.clamp(0, (24 * 60) - 1);
+    if (normalized == _preferences.dailyReminderMinutesAfterMidnight) {
+      return;
+    }
+
+    _preferences = _preferences.copyWith(
+      dailyReminderMinutesAfterMidnight: normalized,
+    );
+    await _services.preferencesRepository.save(_preferences);
+    await _syncScheduledTaskReminders();
     notifyListeners();
   }
 
@@ -563,6 +638,7 @@ class AppController extends ChangeNotifier {
     }
     _cacheSnapshot = null;
     await _persistWidgetSnapshot();
+    await _syncScheduledTaskReminders();
     notifyListeners();
   }
 
@@ -582,6 +658,7 @@ class AppController extends ChangeNotifier {
     _selectedTabIndex = 0;
     _clearError();
     await _persistWidgetSnapshot();
+    await _syncScheduledTaskReminders();
     notifyListeners();
   }
 
@@ -604,11 +681,16 @@ class AppController extends ChangeNotifier {
       if (!allowCachedSession) {
         _session = currentSession;
       }
-      return currentSession != null && !currentSession.isExpired ? currentSession : null;
+      return currentSession != null && !currentSession.isExpired
+          ? currentSession
+          : null;
     }
 
     try {
-      final refreshedSession = await _signInWithSavedLogin(settings, savedLogin);
+      final refreshedSession = await _signInWithSavedLogin(
+        settings,
+        savedLogin,
+      );
       _session = refreshedSession;
       await _services.sessionRepository.save(refreshedSession);
       _clearError();
@@ -620,7 +702,9 @@ class AppController extends ChangeNotifier {
         _session = null;
       }
       _errorMessage = error.message;
-      return currentSession != null && !currentSession.isExpired ? currentSession : null;
+      return currentSession != null && !currentSession.isExpired
+          ? currentSession
+          : null;
     }
   }
 
@@ -632,10 +716,7 @@ class AppController extends ChangeNotifier {
       baseUrl: settings.baseUrl,
       httpClient: _services.httpClient,
     );
-    return client.login(
-      email: savedLogin.email,
-      password: savedLogin.password,
-    );
+    return client.login(email: savedLogin.email, password: savedLogin.password);
   }
 
   void selectTab(int index) {
@@ -681,7 +762,8 @@ class AppController extends ChangeNotifier {
     final now = DateTime.now().toUtc();
     final session = _session;
     final snapshot = _cacheSnapshot;
-    final activeTodayTasks = todayTasks.where((task) => !task.isCompleted).toList(growable: false);
+    final activeTodayTasks =
+        todayTasks.where((task) => !task.isCompleted).toList(growable: false);
     final previewTitles = activeTodayTasks
         .take(3)
         .map((task) => task.title)
@@ -745,7 +827,8 @@ class AppController extends ChangeNotifier {
       subtitle: _widgetSubtitleForSnapshot(snapshot),
       taskCount: activeTodayTasks.length,
       taskTitles: previewTitles,
-      isStale: state == TodayWidgetState.stale || state == TodayWidgetState.error,
+      isStale:
+          state == TodayWidgetState.stale || state == TodayWidgetState.error,
       actionRoute: '/',
       generatedAt: now,
       lastSuccessfulSyncAt: snapshot.lastSuccessfulSyncAt,
@@ -768,7 +851,9 @@ class AppController extends ChangeNotifier {
         snapshot.lastSyncResult == SyncResultStatus.neverSynced) {
       return TodayWidgetState.stale;
     }
-    return activeTaskCount == 0 ? TodayWidgetState.empty : TodayWidgetState.ready;
+    return activeTaskCount == 0
+        ? TodayWidgetState.empty
+        : TodayWidgetState.ready;
   }
 
   String _widgetTitleForState({
@@ -783,7 +868,9 @@ class AppController extends ChangeNotifier {
       case TodayWidgetState.authRequired:
         return 'Sign in again';
       case TodayWidgetState.error:
-        return activeTaskCount == 0 ? 'Today is unavailable' : '$activeTaskCount tasks for today';
+        return activeTaskCount == 0
+            ? 'Today is unavailable'
+            : '$activeTaskCount tasks for today';
       case TodayWidgetState.empty:
         return 'All caught up';
       case TodayWidgetState.stale:
@@ -791,7 +878,9 @@ class AppController extends ChangeNotifier {
         if (activeTaskCount == 0) {
           return 'All caught up';
         }
-        return activeTaskCount == 1 ? '1 task for today' : '$activeTaskCount tasks for today';
+        return activeTaskCount == 1
+            ? '1 task for today'
+            : '$activeTaskCount tasks for today';
     }
   }
 
@@ -825,5 +914,94 @@ class AppController extends ChangeNotifier {
     final hour = local.hour.toString().padLeft(2, '0');
     final minute = local.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  String _buildInitializationDiagnostics(
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    return [
+      'Homeflow Mobile startup diagnostics',
+      'stage: controller_initialize',
+      'release: $appReleaseLabel',
+      'timestamp_utc: ${DateTime.now().toUtc().toIso8601String()}',
+      'error_type: ${error.runtimeType}',
+      'error: $error',
+      'stack_trace:',
+      stackTrace.toString(),
+    ].join('\n');
+  }
+
+  Future<void> _syncScheduledTaskReminders() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    try {
+      if (!_preferences.dailyReminderEnabled ||
+          _session == null ||
+          _cacheSnapshot == null) {
+        await TaskNotificationBridge.cancelTaskNotifications();
+        return;
+      }
+
+      final reminders = _buildScheduledTaskReminders(_cacheSnapshot!);
+      await TaskNotificationBridge.scheduleTaskNotifications(reminders);
+    } catch (_) {
+      // Notification scheduling should never break the main task flow.
+    }
+  }
+
+  List<ScheduledTaskReminder> _buildScheduledTaskReminders(
+    TaskCacheSnapshot snapshot,
+  ) {
+    final reminders = <ScheduledTaskReminder>[];
+    final now = DateTime.now();
+    final end = DateTime(
+      snapshot.windowEnd.year,
+      snapshot.windowEnd.month,
+      snapshot.windowEnd.day,
+    );
+    final reminderHour = _preferences.dailyReminderMinutesAfterMidnight ~/ 60;
+    final reminderMinute = _preferences.dailyReminderMinutesAfterMidnight % 60;
+
+    var currentDay = DateTime(now.year, now.month, now.day);
+    while (!currentDay.isAfter(end)) {
+      final activeCount = _activeTaskCountForReminderDay(currentDay);
+      final scheduledFor = DateTime(
+        currentDay.year,
+        currentDay.month,
+        currentDay.day,
+        reminderHour,
+        reminderMinute,
+      );
+      if (activeCount > 0 && scheduledFor.isAfter(now)) {
+        reminders.add(
+          ScheduledTaskReminder(
+            id: _notificationIdForDay(currentDay),
+            scheduledFor: scheduledFor,
+            title: 'Homeflow',
+            body: activeCount == 1
+                ? 'You have 1 active task today.'
+                : 'You have $activeCount active tasks today.',
+          ),
+        );
+      }
+      currentDay = currentDay.add(const Duration(days: 1));
+    }
+
+    return reminders;
+  }
+
+  int _activeTaskCountForReminderDay(DateTime day) {
+    final target = DateTime.utc(day.year, day.month, day.day);
+    if (target.isAtSameMomentAs(_todayUtc())) {
+      return todayTasks.where((task) => !task.isCompleted).length;
+    }
+    return tasksForDate(target).where((task) => !task.isCompleted).length;
+  }
+
+  int _notificationIdForDay(DateTime day) {
+    return (day.year * 10000) + (day.month * 100) + day.day;
   }
 }

@@ -9,12 +9,9 @@ class AndroidWidgetBridge {
 
   static Future<void> updateTodaySnapshot(TodayWidgetSnapshot snapshot) async {
     try {
-      await _channel.invokeMethod<void>(
-        'updateTodayWidget',
-        <String, dynamic>{
-          'snapshot': jsonEncode(snapshot.toJson()),
-        },
-      );
+      await _channel.invokeMethod<void>('updateTodayWidget', <String, dynamic>{
+        'snapshot': jsonEncode(snapshot.toJson()),
+      });
     } on MissingPluginException {
       // Android widget hosting is optional in non-Android environments.
     } on PlatformException {

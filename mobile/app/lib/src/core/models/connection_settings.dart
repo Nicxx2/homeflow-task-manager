@@ -35,10 +35,6 @@ class ConnectionSettings {
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'scheme': scheme,
-      'host': host,
-      'port': port,
-    };
+    return <String, dynamic>{'scheme': scheme, 'host': host, 'port': port};
   }
 }

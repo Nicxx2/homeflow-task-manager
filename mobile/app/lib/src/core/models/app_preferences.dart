@@ -40,6 +40,8 @@ class AppPreferences {
     required this.offlineTaskWindow,
     required this.autoRefreshOnOpen,
     required this.themeMode,
+    required this.dailyReminderEnabled,
+    required this.dailyReminderMinutesAfterMidnight,
   });
 
   factory AppPreferences.defaults() {
@@ -47,6 +49,8 @@ class AppPreferences {
       offlineTaskWindow: OfflineTaskWindow.days7,
       autoRefreshOnOpen: true,
       themeMode: AppThemeMode.system,
+      dailyReminderEnabled: false,
+      dailyReminderMinutesAfterMidnight: 8 * 60,
     );
   }
 
@@ -57,18 +61,25 @@ class AppPreferences {
       ),
       autoRefreshOnOpen: json['autoRefreshOnOpen'] as bool? ?? true,
       themeMode: AppThemeMode.fromValue(json['themeMode'] as String?),
+      dailyReminderEnabled: json['dailyReminderEnabled'] as bool? ?? false,
+      dailyReminderMinutesAfterMidnight:
+          json['dailyReminderMinutesAfterMidnight'] as int? ?? 8 * 60,
     );
   }
 
   final OfflineTaskWindow offlineTaskWindow;
   final bool autoRefreshOnOpen;
   final AppThemeMode themeMode;
+  final bool dailyReminderEnabled;
+  final int dailyReminderMinutesAfterMidnight;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'offlineTaskWindowDays': offlineTaskWindow.days,
       'autoRefreshOnOpen': autoRefreshOnOpen,
       'themeMode': themeMode.value,
+      'dailyReminderEnabled': dailyReminderEnabled,
+      'dailyReminderMinutesAfterMidnight': dailyReminderMinutesAfterMidnight,
     };
   }
 
@@ -76,11 +87,17 @@ class AppPreferences {
     OfflineTaskWindow? offlineTaskWindow,
     bool? autoRefreshOnOpen,
     AppThemeMode? themeMode,
+    bool? dailyReminderEnabled,
+    int? dailyReminderMinutesAfterMidnight,
   }) {
     return AppPreferences(
       offlineTaskWindow: offlineTaskWindow ?? this.offlineTaskWindow,
       autoRefreshOnOpen: autoRefreshOnOpen ?? this.autoRefreshOnOpen,
       themeMode: themeMode ?? this.themeMode,
+      dailyReminderEnabled: dailyReminderEnabled ?? this.dailyReminderEnabled,
+      dailyReminderMinutesAfterMidnight:
+          dailyReminderMinutesAfterMidnight ??
+          this.dailyReminderMinutesAfterMidnight,
     );
   }
 }

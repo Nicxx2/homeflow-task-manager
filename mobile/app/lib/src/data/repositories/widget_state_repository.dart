@@ -15,7 +15,9 @@ class WidgetStateRepository {
     if (raw == null || raw.isEmpty) {
       return null;
     }
-    return TodayWidgetSnapshot.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    return TodayWidgetSnapshot.fromJson(
+      jsonDecode(raw) as Map<String, dynamic>,
+    );
   }
 
   Future<void> saveToday(TodayWidgetSnapshot snapshot) async {

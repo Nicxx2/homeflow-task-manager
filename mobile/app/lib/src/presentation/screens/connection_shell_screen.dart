@@ -60,6 +60,18 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Center(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Image.asset(
+                          'assets/homeflow_logo.jpg',
+                          width: 140,
+                          height: 140,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     Text(
                       'Connect to your Homeflow server',
                       style: theme.textTheme.headlineSmall,
@@ -86,7 +98,9 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _hostController,
-                      decoration: const InputDecoration(labelText: 'Hostname or IP'),
+                      decoration: const InputDecoration(
+                        labelText: 'Hostname or IP',
+                      ),
                       onChanged: (_) => setState(() {}),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
@@ -152,19 +166,25 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: controller.isAuthenticating ? null : _handleTestConnection,
+                            onPressed: controller.isAuthenticating
+                                ? null
+                                : _handleTestConnection,
                             child: const Text('Test connection'),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton(
-                            onPressed: controller.isAuthenticating ? null : _handleSignIn,
+                            onPressed: controller.isAuthenticating
+                                ? null
+                                : _handleSignIn,
                             child: controller.isAuthenticating
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
                                   )
                                 : const Text('Sign in'),
                           ),
@@ -197,7 +217,9 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
       return;
     }
     final message = okay ? 'Connection succeeded.' : 'Connection failed.';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _handleSignIn() async {

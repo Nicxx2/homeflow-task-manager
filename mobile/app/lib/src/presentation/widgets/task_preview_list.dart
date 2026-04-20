@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
+import '../../core/date_display.dart';
 import '../../core/models/mobile_task.dart';
 
 class TaskPreviewList extends StatelessWidget {
@@ -11,15 +11,18 @@ class TaskPreviewList extends StatelessWidget {
     this.onStatusSelected,
     this.isUpdatingTask,
     this.showAssignmentDate = false,
+    this.showDisplayBucketChip = false,
     super.key,
   });
 
   final List<MobileTask> tasks;
   final String emptyMessage;
   final ValueChanged<MobileTask>? onTaskTap;
-  final Future<void> Function(MobileTask task, MobileTaskStatus status)? onStatusSelected;
+  final Future<void> Function(MobileTask task, MobileTaskStatus status)?
+  onStatusSelected;
   final bool Function(int taskId)? isUpdatingTask;
   final bool showAssignmentDate;
+  final bool showDisplayBucketChip;
 
   @override
   Widget build(BuildContext context) {
@@ -35,63 +38,62 @@ class TaskPreviewList extends StatelessWidget {
 
     return Column(
       children: tasks
-          .map(
-            (task) {
-              final updating = isUpdatingTask?.call(task.id) ?? false;
-              final subtitleParts = <String>[
-                task.status.label,
-                if (showAssignmentDate && task.assignmentDate != null)
-                  'assigned ${DateFormat('dd MMM').format(task.assignmentDate!.toLocal())}',
-                'due ${DateFormat('dd MMM').format(task.dueDate.toLocal())}',
-              ];
-              return Card(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: ListTile(
-                  onTap: onTaskTap == null ? null : () => onTaskTap!(task),
-                  title: Text(task.title),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 4),
-                      Text(subtitleParts.join(' - ')),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          _TaskChip(label: '${task.pointsValue} pts'),
+          .map((task) {
+            final updating = isUpdatingTask?.call(task.id) ?? false;
+            final subtitleParts = <String>[
+              task.status.label,
+              if (showAssignmentDate && task.assignmentDate != null)
+                'assigned ${formatDateOnlyLabel(task.assignmentDate!, 'dd MMM')}',
+              'due ${formatDateOnlyLabel(task.dueDate, 'dd MMM')}',
+            ];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                onTap: onTaskTap == null ? null : () => onTaskTap!(task),
+                title: Text(task.title),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 4),
+                    Text(subtitleParts.join(' - ')),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        _TaskChip(label: '${task.pointsValue} pts'),
+                        if (showDisplayBucketChip)
                           _TaskChip(label: task.displayBucket),
-                          if (task.recurrenceSummary != null)
-                            _TaskChip(label: task.recurrenceSummary!),
-                        ],
-                      ),
-                    ],
-                  ),
-                  trailing: updating
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : onStatusSelected == null
-                          ? Text('${task.pointsValue} pts')
-                          : PopupMenuButton<MobileTaskStatus>(
-                              tooltip: 'Change status',
-                              onSelected: (status) => onStatusSelected!(task, status),
-                              itemBuilder: (context) => MobileTaskStatus.values
-                                  .map(
-                                    (status) => PopupMenuItem(
-                                      value: status,
-                                      child: Text(status.label),
-                                    ),
-                                  )
-                                  .toList(growable: false),
-                              child: const Icon(Icons.more_horiz),
-                            ),
+                        if (task.recurrenceSummary != null)
+                          _TaskChip(label: task.recurrenceSummary!),
+                      ],
+                    ),
+                  ],
                 ),
-              );
-            },
-          )
+                trailing: updating
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : onStatusSelected == null
+                    ? Text('${task.pointsValue} pts')
+                    : PopupMenuButton<MobileTaskStatus>(
+                        tooltip: 'Change status',
+                        onSelected: (status) => onStatusSelected!(task, status),
+                        itemBuilder: (context) => MobileTaskStatus.values
+                            .map(
+                              (status) => PopupMenuItem(
+                                value: status,
+                                child: Text(status.label),
+                              ),
+                            )
+                            .toList(growable: false),
+                        child: const Icon(Icons.more_horiz),
+                      ),
+              ),
+            );
+          })
           .toList(growable: false),
     );
   }
@@ -110,10 +112,7 @@ class _TaskChip extends StatelessWidget {
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelSmall,
-      ),
+      child: Text(label, style: Theme.of(context).textTheme.labelSmall),
     );
   }
 }

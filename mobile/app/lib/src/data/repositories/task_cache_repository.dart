@@ -8,11 +8,11 @@ class TaskCacheRepository {
 
   final LocalStore _store;
 
-  String _cacheKey({
-    required String serverBaseUrl,
-    required String userEmail,
-  }) {
-    final normalized = '$serverBaseUrl::$userEmail'.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  String _cacheKey({required String serverBaseUrl, required String userEmail}) {
+    final normalized = '$serverBaseUrl::$userEmail'.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
     return 'homeflow.cache.$normalized';
   }
 
@@ -43,6 +43,8 @@ class TaskCacheRepository {
     required String serverBaseUrl,
     required String userEmail,
   }) async {
-    await _store.delete(_cacheKey(serverBaseUrl: serverBaseUrl, userEmail: userEmail));
+    await _store.delete(
+      _cacheKey(serverBaseUrl: serverBaseUrl, userEmail: userEmail),
+    );
   }
 }

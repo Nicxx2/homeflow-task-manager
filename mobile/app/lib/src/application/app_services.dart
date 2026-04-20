@@ -9,7 +9,11 @@ import '../data/repositories/session_repository.dart';
 import '../data/repositories/task_cache_repository.dart';
 import '../data/repositories/widget_state_repository.dart';
 import '../data/storage/flutter_secure_store_adapter.dart';
+import '../data/storage/in_memory_local_store.dart';
+import '../data/storage/in_memory_secure_store.dart';
 import '../data/storage/shared_preferences_store.dart';
+import '../core/storage/local_store.dart';
+import '../core/storage/secure_store.dart';
 
 class AppServices {
   AppServices({
@@ -31,9 +35,21 @@ class AppServices {
   final http.Client httpClient;
 
   static Future<AppServices> bootstrap() async {
-    final preferences = await SharedPreferences.getInstance();
-    final localStore = SharedPreferencesStore(preferences);
-    final secureStore = FlutterSecureStoreAdapter(const FlutterSecureStorage());
+    late final LocalStore localStore;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      localStore = SharedPreferencesStore(preferences);
+    } catch (_) {
+      localStore = InMemoryLocalStore();
+    }
+
+    late final SecureStore secureStore;
+    try {
+      secureStore = FlutterSecureStoreAdapter(const FlutterSecureStorage());
+    } catch (_) {
+      secureStore = InMemorySecureStore();
+    }
+
     return AppServices(
       connectionRepository: ConnectionRepository(localStore),
       savedLoginRepository: SavedLoginRepository(secureStore),

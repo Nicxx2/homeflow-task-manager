@@ -24,13 +24,13 @@ class SyncStatusBanner extends StatelessWidget {
     final background = isError
         ? scheme.errorContainer
         : isWarning
-            ? scheme.tertiaryContainer
-            : scheme.secondaryContainer;
+        ? scheme.tertiaryContainer
+        : scheme.secondaryContainer;
     final foreground = isError
         ? scheme.onErrorContainer
         : isWarning
-            ? scheme.onTertiaryContainer
-            : scheme.onSecondaryContainer;
+        ? scheme.onTertiaryContainer
+        : scheme.onSecondaryContainer;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -44,21 +44,20 @@ class SyncStatusBanner extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w700,
-                ),
+              color: foreground,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             message,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: foreground),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: foreground),
           ),
           if (actionLabel != null && onAction != null) ...[
             const SizedBox(height: 10),
-            OutlinedButton(
-              onPressed: onAction,
-              child: Text(actionLabel!),
-            ),
+            OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
           ],
         ],
       ),

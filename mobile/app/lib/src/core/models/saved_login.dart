@@ -1,8 +1,5 @@
 class SavedLogin {
-  const SavedLogin({
-    required this.email,
-    required this.password,
-  });
+  const SavedLogin({required this.email, required this.password});
 
   factory SavedLogin.fromJson(Map<String, dynamic> json) {
     return SavedLogin(
@@ -15,9 +12,6 @@ class SavedLogin {
   final String password;
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'email': email,
-      'password': password,
-    };
+    return <String, dynamic>{'email': email, 'password': password};
   }
 }

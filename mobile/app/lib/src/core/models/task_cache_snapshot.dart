@@ -44,7 +44,9 @@ class TaskCacheSnapshot {
       lastAttemptAt: json['lastAttemptAt'] == null
           ? null
           : DateTime.parse(json['lastAttemptAt'] as String).toUtc(),
-      lastSyncResult: SyncResultStatus.fromValue(json['lastSyncResult'] as String?),
+      lastSyncResult: SyncResultStatus.fromValue(
+        json['lastSyncResult'] as String?,
+      ),
       tasks: rawTasks
           .map((item) => MobileTask.fromJson(item as Map<String, dynamic>))
           .toList(growable: false),

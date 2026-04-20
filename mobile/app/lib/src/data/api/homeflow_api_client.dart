@@ -13,11 +13,9 @@ import 'api_exception.dart';
 class HomeflowApiClient {
   static const Duration _requestTimeout = Duration(seconds: 15);
 
-  HomeflowApiClient({
-    required String baseUrl,
-    required http.Client httpClient,
-  })  : _baseUri = Uri.parse(baseUrl),
-        _httpClient = httpClient;
+  HomeflowApiClient({required String baseUrl, required http.Client httpClient})
+    : _baseUri = Uri.parse(baseUrl),
+      _httpClient = httpClient;
 
   final Uri _baseUri;
   final http.Client _httpClient;
@@ -32,10 +30,7 @@ class HomeflowApiClient {
   }) async {
     final payload = await _postJson(
       '/api/v1/auth/login',
-      body: <String, dynamic>{
-        'email': email,
-        'password': password,
-      },
+      body: <String, dynamic>{'email': email, 'password': password},
     );
     return AuthSession.fromJson(payload);
   }
@@ -85,15 +80,11 @@ class HomeflowApiClient {
     Map<String, String>? queryParameters,
     String? accessToken,
   }) async {
-    final uri = _baseUri.replace(
-      path: path,
-      queryParameters: queryParameters,
-    );
+    final uri = _baseUri.replace(path: path, queryParameters: queryParameters);
     try {
-      final response = await _httpClient.get(
-        uri,
-        headers: _headers(accessToken: accessToken),
-      ).timeout(_requestTimeout);
+      final response = await _httpClient
+          .get(uri, headers: _headers(accessToken: accessToken))
+          .timeout(_requestTimeout);
       return _decodeJson(response);
     } on SocketException {
       throw const ApiException(
@@ -115,11 +106,13 @@ class HomeflowApiClient {
   }) async {
     final uri = _baseUri.replace(path: path);
     try {
-      final response = await _httpClient.post(
-        uri,
-        headers: _headers(accessToken: accessToken),
-        body: jsonEncode(body),
-      ).timeout(_requestTimeout);
+      final response = await _httpClient
+          .post(
+            uri,
+            headers: _headers(accessToken: accessToken),
+            body: jsonEncode(body),
+          )
+          .timeout(_requestTimeout);
       return _decodeJson(response);
     } on SocketException {
       throw const ApiException(
@@ -141,11 +134,13 @@ class HomeflowApiClient {
   }) async {
     final uri = _baseUri.replace(path: path);
     try {
-      final response = await _httpClient.patch(
-        uri,
-        headers: _headers(accessToken: accessToken),
-        body: jsonEncode(body),
-      ).timeout(_requestTimeout);
+      final response = await _httpClient
+          .patch(
+            uri,
+            headers: _headers(accessToken: accessToken),
+            body: jsonEncode(body),
+          )
+          .timeout(_requestTimeout);
       return _decodeJson(response);
     } on SocketException {
       throw const ApiException(
@@ -168,7 +163,9 @@ class HomeflowApiClient {
   }
 
   Map<String, dynamic> _decodeJson(http.Response response) {
-    final dynamic decoded = response.body.isEmpty ? <String, dynamic>{} : jsonDecode(response.body);
+    final dynamic decoded = response.body.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(response.body);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (decoded is Map<String, dynamic>) {
         return decoded;
@@ -179,7 +176,9 @@ class HomeflowApiClient {
       );
     }
 
-    final payload = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    final payload = decoded is Map<String, dynamic>
+        ? decoded
+        : <String, dynamic>{};
     final code = payload['code'] as String?;
     final detail = payload['detail'] as String? ?? 'Server request failed.';
     throw ApiException(

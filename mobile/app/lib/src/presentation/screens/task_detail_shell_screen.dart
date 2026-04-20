@@ -3,8 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../application/app_controller.dart';
+import '../../core/date_display.dart';
 import '../../core/models/mobile_task.dart';
-import '../widgets/sync_status_banner.dart';
+import '../widgets/sync_status_strip.dart';
 
 class TaskDetailShellScreen extends StatelessWidget {
   const TaskDetailShellScreen({super.key});
@@ -19,7 +20,34 @@ class TaskDetailShellScreen extends StatelessWidget {
     final isUpdating = taskId != null && controller.isUpdatingTask(taskId);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Task detail')),
+      appBar: AppBar(
+        title: const Text('Task detail'),
+        actions: [
+          if (controller.isSyncing)
+            const Padding(
+              padding: EdgeInsets.only(right: 20),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              ),
+            )
+          else
+            IconButton(
+              onPressed:
+                  controller.canRetrySync ? controller.refreshTasks : null,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+            ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(44),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: SyncStatusStrip(controller: controller),
+          ),
+        ),
+      ),
       body: SafeArea(
         child: task == null
             ? const Padding(
@@ -29,15 +57,6 @@ class TaskDetailShellScreen extends StatelessWidget {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  SyncStatusBanner(
-                    title: controller.syncBannerTitle,
-                    message: controller.syncStatusMessage,
-                    isWarning: controller.syncBannerIsWarning,
-                    isError: controller.syncBannerIsError,
-                    actionLabel: controller.canRetrySync ? controller.syncBannerActionLabel : null,
-                    onAction: controller.canRetrySync ? controller.refreshTasks : null,
-                  ),
-                  const SizedBox(height: 16),
                   Text(
                     task.title,
                     style: Theme.of(context).textTheme.headlineSmall,
@@ -85,29 +104,25 @@ class TaskDetailShellScreen extends StatelessWidget {
                   const SizedBox(height: 20),
                   _DetailRow(
                     label: 'Due date',
-                    value: DateFormat('dd MMM yyyy').format(task.dueDate.toLocal()),
+                    value: formatDateOnlyLabel(task.dueDate, 'dd MMM yyyy'),
                   ),
                   _DetailRow(
                     label: 'Assignment',
                     value: task.assignmentDate == null
                         ? 'Not assigned'
-                        : DateFormat('dd MMM yyyy').format(task.assignmentDate!.toLocal()),
+                        : formatDateOnlyLabel(
+                            task.assignmentDate!,
+                            'dd MMM yyyy',
+                          ),
                   ),
-                  _DetailRow(
-                    label: 'Effort',
-                    value: task.effortLevel.value,
-                  ),
-                  _DetailRow(
-                    label: 'Points',
-                    value: '${task.pointsValue}',
-                  ),
-                  _DetailRow(
-                    label: 'Bucket',
-                    value: task.displayBucket,
-                  ),
+                  _DetailRow(label: 'Effort', value: task.effortLevel.value),
+                  _DetailRow(label: 'Points', value: '${task.pointsValue}'),
+                  _DetailRow(label: 'Bucket', value: task.displayBucket),
                   _DetailRow(
                     label: 'Updated',
-                    value: DateFormat('dd MMM yyyy, HH:mm').format(task.updatedAt.toLocal()),
+                    value: DateFormat(
+                      'dd MMM yyyy, HH:mm',
+                    ).format(task.updatedAt.toLocal()),
                   ),
                   if (task.recurrenceSummary != null)
                     _DetailRow(
@@ -129,10 +144,7 @@ class TaskDetailShellScreen extends StatelessWidget {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({
-    required this.label,
-    required this.value,
-  });
+  const _DetailRow({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -148,9 +160,9 @@ class _DetailRow extends StatelessWidget {
             width: 110,
             child: Text(
               label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
           Expanded(child: Text(value)),
