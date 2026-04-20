@@ -87,8 +87,13 @@ The app must:
 
 - log in with email and password
 - store the returned token in secure storage
-- avoid storing the raw password by default
+- if saved login is enabled, store credentials only in secure storage for session restoration
 - clear token and user-specific cache on logout
+
+The app may:
+
+- retain saved login details in secure storage so expired sessions can be restored on app reopen
+- refresh session state automatically when the app resumes
 
 The app should be ready for either:
 
@@ -166,6 +171,7 @@ Behavior:
 - pull to refresh
 - tap into task detail
 - fast status changes without leaving the screen where reasonable
+- if a cached auth failure can be recovered silently, avoid showing a manual sign-in prompt prematurely
 
 ### Upcoming
 
@@ -219,10 +225,18 @@ Content:
 - signed-in email
 - offline task window
 - auto-refresh on app open
+- daily reminder enabled state
+- daily reminder time
 - manual refresh
 - last sync status
 - clear cached data
 - logout
+
+Behavior:
+
+- persist settings across app restarts
+- reschedule Android reminders from cached task data when reminder settings change
+- keep reminder behavior independent from transient in-memory session state when valid cache exists
 
 ## Data Model Expectations
 
@@ -273,12 +287,14 @@ The sync coordinator should:
 - replace or merge cached task rows deterministically
 - keep the previous cache on failed refresh
 - expose sync state to both screens and widget code
+- allow session restoration before surfacing a hard auth-required state when saved login is available
 
 The app should not:
 
 - clear valid cache just because one refresh failed
 - show stale data without a label
 - fabricate empty future days
+- cancel reminder scheduling only because the active in-memory session object was lost while valid cache still exists
 
 ## Ordering Rules
 
@@ -322,6 +338,8 @@ Each implementation phase should include:
 - backend API verification
 - app-level state verification
 - offline and retry verification
+- session-restore and app-resume verification
+- reminder preference persistence and notification scheduling verification
 - regression checks for stale or missing-cache cases
 
 Detailed phase gates are defined in `phased-plan.md`.

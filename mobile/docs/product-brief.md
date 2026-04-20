@@ -22,6 +22,7 @@ Keep the mobile app practical, reliable, and logical:
 - refresh from the user's own server when reachable
 - update task status quickly from the phone
 - optionally expose a simple home screen widget for quick visibility
+- optionally expose simple daily reminder notifications based on cached tasks
 
 ## Secondary Purpose
 
@@ -41,10 +42,11 @@ Keep the mobile app practical, reliable, and logical:
 2. User enters server hostname or IP, port, and login credentials.
 3. App signs in against the user's own Homeflow server.
 4. App stores session information securely on-device.
-5. App fetches tasks relevant to the logged-in user.
-6. App opens to today's tasks first.
-7. User updates task status quickly from the phone.
-8. If the server later becomes unreachable, the app still shows previously cached task data and explains the sync state clearly.
+5. App can optionally retain saved login details in secure storage so sessions can be restored on reopen.
+6. App fetches tasks relevant to the logged-in user.
+7. App opens to today's tasks first.
+8. User updates task status quickly from the phone.
+9. If the server later becomes unreachable, the app still shows previously cached task data and explains the sync state clearly.
 
 ## V1 Scope
 
@@ -67,6 +69,9 @@ Keep the mobile app practical, reliable, and logical:
 - cache a practical rolling window of task data locally
 - show last sync time and last sync result
 - show clear offline and server-unreachable states
+- restore session state when the app reopens where possible
+- persist reminder and sync preferences across app restarts
+- optionally provide Android daily reminder notifications backed by cached tasks
 - optionally provide a simple read-first home screen widget
 
 ### V1 Non-Goals
@@ -101,6 +106,8 @@ Planned distribution path:
 - offline cache window
 - manual refresh
 - optional auto-refresh on app open
+- optional daily reminder notifications
+- reminder time
 
 Helpful extras:
 
@@ -112,7 +119,7 @@ Helpful extras:
 ## Security Expectations
 
 - store tokens in platform secure storage
-- avoid storing the raw password unless there is no reasonable alternative
+- if saved login is supported for session restoration, store credentials only in platform secure storage
 - clear auth state fully on logout
 - support HTTPS cleanly for externally exposed servers
 - allow local network server URLs, while making it clear that reachability depends on network access unless the user uses VPN or similar
