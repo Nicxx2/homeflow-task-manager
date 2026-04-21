@@ -144,9 +144,9 @@ class WorkloadService:
         is_past_date = date_value < today
         schedule_block = self.scheduling.get_block_for_date(user_id=user_id, date_value=date_value)
         current_points = self.get_daily_points(user_id=user_id, date_value=date_value, exclude_task_id=exclude_task_id)
+        base_capacity = self.get_base_user_capacity(user_id)
         capacity = self.get_user_capacity(user_id, date_value=date_value)
         projected_points = current_points + task_points
-        task_too_large = False
         blocked_by_policy = schedule_block is not None and not allow_policy_override
         fits_capacity = capacity is not None and projected_points <= capacity
         fits = fits_capacity and not blocked_by_policy and not is_past_date
@@ -171,6 +171,14 @@ class WorkloadService:
                 allow_policy_override=True,
             )
 
+        # A task is "too large" only when it exceeds the user's baseline daily capacity
+        # and there is no future date in the search window where configured capacity would fit it.
+        task_too_large = (
+            base_capacity is not None
+            and task_points > base_capacity
+            and suggestion is None
+        )
+
         message = "Assignment is within capacity."
         if is_past_date:
             message = "Assignment date cannot be in the past."
@@ -178,6 +186,8 @@ class WorkloadService:
             message = "No daily capacity configured for this user."
         elif blocked_by_policy and schedule_block is not None:
             message = schedule_block["message"]
+        elif task_too_large:
+            message = "Task exceeds this user's daily capacity and cannot be assigned on any day unless their capacity changes."
         elif not fits:
             message = "Assignment exceeds daily capacity."
             if suggestion is None:

@@ -178,6 +178,36 @@ def test_assignment_larger_than_capacity_is_marked_impossible():
         db.close()
 
 
+def test_assignment_larger_than_base_capacity_can_still_fit_with_future_override():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator6b-{token}@example.com", 10)
+        assignee = _create_user(db, f"phase3-assignee6b-{token}@example.com", 6)
+        day = date.today() + timedelta(days=2)
+        override_day = day + timedelta(days=3)
+
+        WorkloadService(db).set_extra_capacity_points(
+            user_id=assignee.id,
+            date_value=override_day,
+            extra_capacity_points=2,
+        )
+
+        task = _create_task(db, creator, EffortLevel.HIGH, "Oversized but override-capable task", day)
+        result = WorkloadService(db).validate_assignment(
+            user_id=assignee.id,
+            date_value=day,
+            task_points=task.points_value,
+        )
+
+        assert result["valid"] is False
+        assert result["task_too_large"] is False
+        assert result["next_available_date"] == override_day.isoformat()
+    finally:
+        db.close()
+
+
 def test_assignment_in_past_is_rejected_and_suggests_current_slot():
     db = SessionLocal()
     try:
