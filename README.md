@@ -201,6 +201,7 @@ If someone is away or has blocked days
 - Faster scheduling directly from the web Tasks page with a compact calendar action on each task card.
 - Optional assign-on-create flow so a task can be planned immediately without leaving creation.
 - Quick due date and assignment updates from both the Tasks page and Day View with the same minimalist schedule popover.
+- Clearer recurring-task editing that separates current-occurrence scheduling from future repeat settings, with better remaining-occurrence guidance.
 - Temporary extra capacity on specific days or short date ranges without changing a member's base admin-set capacity.
 - Better next-available suggestions that now account for temporary extra capacity as well as blocked days and existing workload.
 - Cleaner task detail flow with clearer assignment handling, safer deletion, and preserved recurring-task history where appropriate.
