@@ -33,7 +33,9 @@
         <div class="mb-4 flex items-start justify-between gap-3">
           <div>
             <p class="text-sm font-medium">Schedule</p>
-            <p class="text-xs text-slate-500 dark:text-slate-400">Adjust dates without leaving the current view.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+              Adjust dates without leaving the current view.{% if task.recurrence_pattern == "weekly" and not task.recurrence_parent_id %} This only changes the active occurrence.{% endif %}
+            </p>
           </div>
           <div class="flex items-center gap-2">
             <span class="rounded-full border border-slate-200 px-2 py-1 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-slate-400">

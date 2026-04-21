@@ -8,7 +8,7 @@ from backend.app.models.task import Task
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user import User
 from backend.app.models.user_daily_capacity import UserDailyCapacity
-from backend.app.schemas.task import TaskCreate
+from backend.app.schemas.task import TaskCreate, TaskUpdate
 from backend.app.services.recurring_task_service import RecurringTaskService
 from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
@@ -366,6 +366,55 @@ def test_weekly_recurring_task_rolls_forward_with_single_active_task():
         db.close()
 
 
+def test_weekly_recurring_task_skip_blocked_day_counts_skipped_occurrence_once():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator8b-{token}@example.com", 10)
+        assignee = _create_user(db, f"phase3-assignee8b-{token}@example.com", 10)
+        scheduling = SchedulingService(db)
+        scheduling.add_away_period(
+            user_id=assignee.id,
+            start_date=date(2026, 4, 15),
+            end_date=date(2026, 4, 15),
+            note="Away on Wednesday",
+        )
+
+        payload = TaskCreate(
+            title="Weekly recycling",
+            description="Put recycling out",
+            due_date=date(2026, 4, 8),
+            effort_level=EffortLevel.LOW,
+            ai_suggested_level=EffortLevel.LOW,
+            ai_confidence=0.7,
+            ai_reason="test",
+            fallback_used=False,
+            provider_used="rules",
+            model_used="rules-default",
+            recurrence_pattern="weekly",
+            recurrence_interval_weeks=1,
+            recurrence_count_limit=4,
+            recurrence_blocked_behavior="skip",
+        )
+        root = TaskService(db).create_unassigned_task(payload, creator)
+        TaskService(db).assign_task(root, assignee_id=assignee.id, assignment_date=root.due_date)
+
+        service = TaskService(db)
+        service.update_status(root, TaskStatus.COMPLETED)
+        db.refresh(root)
+
+        recurring = RecurringTaskService(db)
+        assert root.status == TaskStatus.PENDING
+        assert root.due_date == date(2026, 4, 22)
+        assert root.assignment_date == date(2026, 4, 22)
+        assert root.recurrence_occurrence_index == 2
+        assert recurring.remaining_count_limit_occurrences(root) == 2
+        assert recurring.preview_next_occurrence(root)["due_date"] == date(2026, 4, 29)
+    finally:
+        db.close()
+
+
 def test_recurring_sync_removes_legacy_future_occurrences():
     db = SessionLocal()
     try:
@@ -399,5 +448,106 @@ def test_recurring_sync_removes_legacy_future_occurrences():
 
         assert removed == 1
         assert remaining == []
+    finally:
+        db.close()
+
+
+def test_editing_recurring_task_preserves_progress_and_remaining_count_limit():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator10-{token}@example.com", 10)
+
+        payload = TaskCreate(
+            title="Shift recurring weekday",
+            description="Recurring edit coverage",
+            due_date=date(2026, 4, 6),
+            effort_level=EffortLevel.LOW,
+            ai_suggested_level=EffortLevel.LOW,
+            ai_confidence=0.7,
+            ai_reason="test",
+            fallback_used=False,
+            provider_used="rules",
+            model_used="rules-default",
+            recurrence_pattern="weekly",
+            recurrence_interval_weeks=1,
+            recurrence_count_limit=10,
+            recurrence_blocked_behavior="skip",
+        )
+        root = TaskService(db).create_unassigned_task(payload, creator)
+
+        root.due_date = date(2026, 5, 4)
+        root.recurrence_occurrence_index = 4
+        db.add(root)
+        db.commit()
+        db.refresh(root)
+
+        service = TaskService(db)
+        service.update_task(
+            root,
+            TaskUpdate(
+                title=root.title,
+                description=root.description,
+                due_date=date(2026, 5, 7),
+                effort_level=root.effort_level,
+                status=root.status,
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_count_limit=10,
+                recurrence_blocked_behavior="skip",
+            ),
+            recurrence_series_due_date=date(2026, 5, 14),
+        )
+        db.refresh(root)
+
+        recurring = RecurringTaskService(db)
+        assert root.due_date == date(2026, 5, 7)
+        assert root.recurrence_anchor_date == date(2026, 4, 9)
+        assert recurring.current_occurrence_index(root) == 4
+        assert recurring.remaining_count_limit_occurrences(root) == 6
+        assert recurring.preview_next_occurrence(root)["due_date"] == date(2026, 5, 14)
+    finally:
+        db.close()
+
+
+def test_rescheduling_current_recurring_occurrence_does_not_move_future_series():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(db, f"phase3-creator11-{token}@example.com", 10)
+
+        payload = TaskCreate(
+            title="Recurring one-off move",
+            description="Current occurrence scheduling coverage",
+            due_date=date(2026, 4, 6),
+            effort_level=EffortLevel.LOW,
+            ai_suggested_level=EffortLevel.LOW,
+            ai_confidence=0.7,
+            ai_reason="test",
+            fallback_used=False,
+            provider_used="rules",
+            model_used="rules-default",
+            recurrence_pattern="weekly",
+            recurrence_interval_weeks=1,
+            recurrence_count_limit=10,
+            recurrence_blocked_behavior="skip",
+        )
+        root = TaskService(db).create_unassigned_task(payload, creator)
+        root.due_date = date(2026, 5, 4)
+        root.recurrence_occurrence_index = 4
+        db.add(root)
+        db.commit()
+        db.refresh(root)
+
+        service = TaskService(db)
+        service.update_task_schedule(root, due_date=date(2026, 5, 6), assignee_id=None, assignment_date=None)
+        db.refresh(root)
+
+        recurring = RecurringTaskService(db)
+        assert root.due_date == date(2026, 5, 6)
+        assert recurring.current_occurrence_index(root) == 4
+        assert recurring.preview_next_occurrence(root)["due_date"] == date(2026, 5, 11)
     finally:
         db.close()

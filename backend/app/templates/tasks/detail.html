@@ -166,7 +166,9 @@
 {% if can_manage_task %}
 <section class="app-surface density-panel mt-5 rounded-xl border p-5">
   <h2 class="font-medium mb-1">Assign Task</h2>
-  <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Assignment is a separate step from task creation.</p>
+  <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
+    Assignment is a separate step from task creation.{% if task.recurrence_pattern == "weekly" and not task.recurrence_parent_id %} This only changes the current occurrence.{% endif %}
+  </p>
   <form method="post" action="/tasks/{{ task.id }}/assign" class="space-y-4" data-schedule-form data-schedule-preview-url="/tasks/{{ task.id }}/assignment-check" data-next-available-url="/tasks/{{ task.id }}/assignment-next-available" onsubmit="return appValidateScheduleForm(this)">
     <input type="hidden" name="redirect_to" value="{{ return_to or '' }}" />
     <input type="hidden" value="{{ task.due_date }}" data-schedule-due-date />

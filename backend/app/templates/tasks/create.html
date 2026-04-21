@@ -168,13 +168,13 @@
         </div>
       </summary>
       <div class="mt-3">
-        <label class="flex items-center gap-2 text-sm font-medium">
-          <input type="checkbox" name="repeat_weekly" value="true" {% if form_values.repeat_weekly %}checked{% endif %} />
-          Repeat weekly from this due date
-        </label>
-        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          Use the due date as the anchor day, for example every Tuesday. Only one active recurring task stays visible at a time. When you complete it, the next occurrence becomes the active task.
-        </p>
+      <label class="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" name="repeat_weekly" value="true" {% if form_values.repeat_weekly %}checked{% endif %} />
+        Repeat weekly from this due date
+      </label>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        The due date sets the repeat day, for example every Tuesday. Only one recurring task stays active at a time. When you complete it, the next one becomes active.
+      </p>
         <div class="mt-3 grid gap-3 md:grid-cols-3">
           <label class="text-sm">
             <span class="mb-1 block">Every X weeks</span>

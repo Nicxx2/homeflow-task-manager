@@ -1438,3 +1438,115 @@ def test_task_edit_invalid_submission_returns_form_error():
         assert "Please provide valid task values before saving." in response.text
     finally:
         db.close()
+
+
+def test_task_edit_page_shows_current_recurring_summary_and_next_due_date():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-recurring-{token}@example.com",
+            full_name="Edit Recurring User",
+            capacity=10,
+        )
+        due_day = date.today() + timedelta(days=3)
+        task = _create_task(db, creator=viewer, assignee=viewer, title=f"Recurring Edit Task {token}", day=due_day)
+        task.recurrence_pattern = "weekly"
+        task.recurrence_interval_weeks = 2
+        task.recurrence_count_limit = 10
+        task.recurrence_anchor_date = due_day
+        task.recurrence_occurrence_index = 0
+        task.recurrence_blocked_behavior = "skip"
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}/edit")
+
+        next_due = due_day + timedelta(weeks=2)
+        expected_next_due = f"{next_due.strftime('%A')}, {next_due.day} {next_due.strftime('%b %Y')}"
+
+        assert response.status_code == 200
+        assert f"Every 2 weeks on {due_day.strftime('%A')}" in response.text
+        assert "Due date for this task" in response.text
+        assert "Use the recurring section below to change future repeats." in response.text
+        assert "Future repeat due date" in response.text
+        assert 'value="10"' in response.text
+        assert f'value="{next_due.isoformat()}"' in response.text
+        assert "This current task plus 9 more future repeats are left in the series." in response.text
+        assert "Occurrences left including this task:" not in response.text
+        assert f"Next due: {expected_next_due}" in response.text
+        assert f"Next due date: {expected_next_due}" not in response.text
+        assert "These changes start after this task and leave the current occurrence as-is." in response.text
+    finally:
+        db.close()
+
+
+def test_task_edit_page_shows_occurrences_left_from_current_series_position():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-recurring-left-{token}@example.com",
+            full_name="Edit Recurring Left User",
+            capacity=10,
+        )
+        anchor_day = date.today() - timedelta(days=28)
+        current_day = anchor_day + timedelta(weeks=4)
+        task = _create_task(db, creator=viewer, assignee=viewer, title=f"Recurring Left Task {token}", day=current_day)
+        task.recurrence_pattern = "weekly"
+        task.recurrence_interval_weeks = 1
+        task.recurrence_count_limit = 10
+        task.recurrence_anchor_date = anchor_day
+        task.recurrence_occurrence_index = 4
+        task.recurrence_blocked_behavior = "skip"
+        db.add(task)
+        db.commit()
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}/edit")
+
+        assert response.status_code == 200
+        assert 'value="6"' in response.text
+        assert "This current task plus 5 more future repeats are left in the series." in response.text
+        assert "Occurrences left including this task:" not in response.text
+        assert 'name="recurrence_series_due_date"' in response.text
+    finally:
+        db.close()
+
+
+def test_task_edit_page_shows_final_occurrence_message_when_one_is_left():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-recurring-final-left-{token}@example.com",
+            full_name="Edit Recurring Final Left User",
+            capacity=10,
+        )
+        current_day = date.today() + timedelta(days=3)
+        task = _create_task(db, creator=viewer, assignee=viewer, title=f"Recurring Final Left Task {token}", day=current_day)
+        task.recurrence_pattern = "weekly"
+        task.recurrence_interval_weeks = 1
+        task.recurrence_count_limit = 1
+        task.recurrence_anchor_date = current_day
+        task.recurrence_occurrence_index = 0
+        task.recurrence_blocked_behavior = "skip"
+        db.add(task)
+        db.commit()
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}/edit")
+
+        assert response.status_code == 200
+        assert 'value="1"' in response.text
+        assert "This current task is the final occurrence in the series." in response.text
+    finally:
+        db.close()

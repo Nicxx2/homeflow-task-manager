@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -47,6 +47,7 @@ class TaskService:
             recurrence_count_limit=payload.recurrence_count_limit,
             recurrence_blocked_behavior=payload.recurrence_blocked_behavior,
             recurrence_anchor_date=payload.due_date if payload.recurrence_pattern else None,
+            recurrence_occurrence_index=0 if payload.recurrence_pattern else None,
         )
         self.db.add(task)
         self.db.commit()
@@ -132,7 +133,24 @@ class TaskService:
     def get_task(self, task_id: int) -> Task | None:
         return self.db.get(Task, task_id)
 
-    def update_task(self, task: Task, payload: TaskUpdate) -> Task:
+    def _updated_recurrence_anchor_date(
+        self,
+        *,
+        task: Task,
+        payload: TaskUpdate,
+        recurrence_series_due_date: date | None,
+    ) -> date | None:
+        if not payload.recurrence_pattern:
+            return None
+        if task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None and recurrence_series_due_date is not None:
+            current_index = RecurringTaskService(self.db).current_occurrence_index(task)
+            interval_weeks = payload.recurrence_interval_weeks or 1
+            return recurrence_series_due_date - timedelta(weeks=interval_weeks * (current_index + 1))
+        if task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None:
+            return task.recurrence_anchor_date or payload.due_date
+        return payload.due_date
+
+    def update_task(self, task: Task, payload: TaskUpdate, *, recurrence_series_due_date: date | None = None) -> Task:
         task.title = payload.title.strip()
         task.description = payload.description.strip()
         task.due_date = payload.due_date
@@ -144,7 +162,19 @@ class TaskService:
         task.recurrence_until = payload.recurrence_until
         task.recurrence_count_limit = payload.recurrence_count_limit
         task.recurrence_blocked_behavior = payload.recurrence_blocked_behavior
-        task.recurrence_anchor_date = payload.due_date if payload.recurrence_pattern else None
+        task.recurrence_anchor_date = self._updated_recurrence_anchor_date(
+            task=task,
+            payload=payload,
+            recurrence_series_due_date=recurrence_series_due_date,
+        )
+        if payload.recurrence_pattern:
+            task.recurrence_occurrence_index = (
+                task.recurrence_occurrence_index
+                if task.recurrence_pattern == "weekly" and task.recurrence_occurrence_index is not None
+                else 0
+            )
+        else:
+            task.recurrence_occurrence_index = None
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)

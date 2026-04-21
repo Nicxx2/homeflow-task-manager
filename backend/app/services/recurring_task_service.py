@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,45 @@ class RecurringTaskService:
     def __init__(self, db: Session):
         self.db = db
         self.workload = WorkloadService(db)
+
+    def preview_next_occurrence(self, root: Task) -> dict | None:
+        return self._next_occurrence_after_current(root)
+
+    def current_occurrence_index(self, root: Task) -> int:
+        return self._current_occurrence_index(root)
+
+    def remaining_count_limit_occurrences(self, root: Task) -> int | None:
+        if not root.recurrence_count_limit:
+            return None
+        return max(root.recurrence_count_limit - self.current_occurrence_index(root), 0)
+
+    def remaining_occurrence_count(self, root: Task) -> int | None:
+        if not root.recurrence_count_limit and not root.recurrence_until:
+            return None
+
+        cursor = SimpleNamespace(
+            due_date=root.due_date,
+            assignment_date=root.assignment_date,
+            assignee_id=root.assignee_id,
+            points_value=root.points_value,
+            recurrence_interval_weeks=root.recurrence_interval_weeks,
+            recurrence_count_limit=root.recurrence_count_limit,
+            recurrence_until=root.recurrence_until,
+            recurrence_blocked_behavior=root.recurrence_blocked_behavior,
+            recurrence_anchor_date=root.recurrence_anchor_date,
+            recurrence_occurrence_index=self.current_occurrence_index(root),
+        )
+
+        remaining = 0
+        while True:
+            next_occurrence = self._next_occurrence_after_current(cursor)
+            if next_occurrence is None:
+                return remaining
+            remaining += 1
+            cursor.due_date = next_occurrence["due_date"]
+            cursor.assignment_date = next_occurrence["assignment_date"]
+            cursor.assignee_id = next_occurrence["assignee_id"]
+            cursor.recurrence_occurrence_index = next_occurrence["occurrence_index"]
 
     def sync(self) -> int:
         legacy_occurrences = list(
@@ -47,6 +87,7 @@ class RecurringTaskService:
         root.due_date = next_occurrence["due_date"]
         root.assignment_date = next_occurrence["assignment_date"]
         root.assignee_id = next_occurrence["assignee_id"]
+        root.recurrence_occurrence_index = next_occurrence["occurrence_index"]
         self.db.add(root)
         self.db.commit()
         self.db.refresh(root)
@@ -84,12 +125,16 @@ class RecurringTaskService:
         root.due_date = next_occurrence["due_date"]
         root.assignment_date = next_occurrence["assignment_date"]
         root.assignee_id = next_occurrence["assignee_id"]
+        root.recurrence_occurrence_index = next_occurrence["occurrence_index"]
         self.db.add(root)
         self.db.commit()
         self.db.refresh(root)
         return root
 
     def _current_occurrence_index(self, root: Task) -> int:
+        stored_index = getattr(root, "recurrence_occurrence_index", None)
+        if stored_index is not None:
+            return max(stored_index, 0)
         anchor = root.recurrence_anchor_date or root.due_date
         interval_days = max((root.recurrence_interval_weeks or 1) * 7, 1)
         delta_days = max((root.due_date - anchor).days, 0)
@@ -117,7 +162,7 @@ class RecurringTaskService:
     def _next_occurrence_after_current(self, root: Task) -> dict | None:
         anchor = root.recurrence_anchor_date or root.due_date
         interval_weeks = root.recurrence_interval_weeks or 1
-        next_index = self._current_occurrence_index(root) + 1
+        next_index = self.current_occurrence_index(root) + 1
 
         while True:
             if root.recurrence_count_limit and next_index >= root.recurrence_count_limit:
@@ -148,6 +193,7 @@ class RecurringTaskService:
                     assignee_id = None
 
             return {
+                "occurrence_index": next_index,
                 "due_date": resolved_due_date,
                 "assignment_date": assignment_date,
                 "assignee_id": assignee_id if assignment_date is not None else None,

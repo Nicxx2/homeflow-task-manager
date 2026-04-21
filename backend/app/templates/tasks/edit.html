@@ -19,8 +19,11 @@
     <textarea name="description" rows="4" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required>{{ task.description }}</textarea>
   </div>
   <div>
-    <label class="block text-sm mb-1">Due date</label>
+    <label class="block text-sm mb-1">{% if is_recurring_root %}Due date for this task{% else %}Due date{% endif %}</label>
     <input type="date" name="due_date" value="{{ task.due_date }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
+    {% if is_recurring_root %}
+    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">This changes only the active occurrence. Use the recurring section below to change future repeats.</p>
+    {% endif %}
   </div>
   <div>
     <label class="block text-sm mb-1">Effort level</label>
@@ -67,20 +70,59 @@
       <div class="flex items-center justify-between gap-3">
         <div>
           <p class="text-sm font-medium">Recurring task options</p>
+          {% if recurrence_preview %}
+          <p class="text-xs text-slate-500 dark:text-slate-400">These changes start after this task and leave the current occurrence as-is.</p>
+          {% else %}
           <p class="text-xs text-slate-500 dark:text-slate-400">Open when this task should repeat weekly from the due date.</p>
+          {% endif %}
         </div>
+        {% if recurrence_preview %}
+        <div class="text-right text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+          <p>{{ recurrence_preview.cadence_label }}</p>
+          {% if recurrence_preview.next_due_label %}
+          <p>Next due: {{ recurrence_preview.next_due_label }}</p>
+          {% else %}
+          <p>Ends after this task</p>
+          {% endif %}
+        </div>
+        {% else %}
         <span class="text-xs text-slate-500 dark:text-slate-400">{% if task.recurrence_pattern == "weekly" %}Enabled{% else %}Optional{% endif %}</span>
+        {% endif %}
       </div>
     </summary>
     <div class="mt-3">
+      {% if recurrence_preview %}
+      <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+        {% if recurrence_preview.future_occurrence_count is not none %}
+          {% if recurrence_preview.future_occurrence_count == 0 %}
+        <p>This is the final scheduled occurrence in the current series.</p>
+          {% else %}
+        <p>{{ recurrence_preview.future_occurrence_count }} future occurrence{{ "" if recurrence_preview.future_occurrence_count == 1 else "s" }} remain after this one.</p>
+          {% endif %}
+        {% endif %}
+        {% if recurrence_preview.next_assignment_label %}
+        <p>
+          Next assignment date: {{ recurrence_preview.next_assignment_label }}{% if recurrence_preview.next_assignment_assignee %} for {{ recurrence_preview.next_assignment_assignee }}{% endif %}
+        </p>
+        {% elif task.assignee_id %}
+        <p>Next assignment date: Unassigned until the next occurrence can be scheduled.</p>
+        {% endif %}
+      </div>
+      {% endif %}
       <label class="flex items-center gap-2 text-sm font-medium">
         <input type="checkbox" name="repeat_weekly" value="true" {% if task.recurrence_pattern == "weekly" %}checked{% endif %} />
         Repeat weekly from this due date
       </label>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        The due date anchors the recurring weekday. Only one active recurring task stays visible at a time, and shifted blocked occurrences do not change the main weekly pattern.
+        Future repeats follow the weekday set below. If one occurrence is moved because that day is blocked, later repeats still return to the normal weekday.
       </p>
       <div class="mt-3 grid gap-3 md:grid-cols-3">
+        {% if recurrence_preview %}
+        <label class="text-sm">
+          <span class="mb-1 block">Future repeat due date</span>
+          <input type="date" name="recurrence_series_due_date" value="{{ recurrence_series_due_date_input_value }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+        </label>
+        {% endif %}
         <label class="text-sm">
           <span class="mb-1 block">Every X weeks</span>
           <input type="number" min="1" name="recurrence_interval_weeks" value="{{ task.recurrence_interval_weeks or 1 }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
@@ -90,10 +132,25 @@
           <input type="date" name="recurrence_until" value="{{ task.recurrence_until or '' }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block">Total occurrences (optional)</span>
-          <input type="number" min="1" name="recurrence_count_limit" value="{{ task.recurrence_count_limit or '' }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+          <span class="mb-1 block">{% if recurrence_preview %}Occurrences left (optional){% else %}Total occurrences (optional){% endif %}</span>
+          <input type="number" min="1" name="recurrence_count_limit" value="{{ recurrence_count_limit_input_value }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
         </label>
       </div>
+      {% if recurrence_preview %}
+        {% if recurrence_preview.remaining_count_limit_occurrences is not none %}
+      <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        {% if recurrence_preview.remaining_count_limit_occurrences == 1 %}
+        This current task is the final occurrence in the series.
+        {% else %}
+        This current task plus {{ recurrence_preview.remaining_count_limit_occurrences - 1 }} more future repeat{{ "" if (recurrence_preview.remaining_count_limit_occurrences - 1) == 1 else "s" }} are left in the series.
+        {% endif %}
+      </p>
+        {% else %}
+      <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        If you set a number here, it counts from this task onward.
+      </p>
+        {% endif %}
+      {% endif %}
       <label class="mt-3 block text-sm">
         <span class="mb-1 block">If the scheduled day is blocked</span>
         <select name="recurrence_blocked_behavior" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">

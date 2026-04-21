@@ -61,6 +61,7 @@ class Task(Base):
     recurrence_blocked_behavior: Mapped[str | None] = mapped_column(String(30), nullable=True)
     recurrence_parent_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True, index=True)
     recurrence_anchor_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    recurrence_occurrence_index: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

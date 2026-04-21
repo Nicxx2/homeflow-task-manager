@@ -337,6 +337,98 @@ def _task_detail_context(
     }
 
 
+def _format_weekday_date(value: date) -> str:
+    return f"{value.strftime('%A')}, {value.day} {value.strftime('%b %Y')}"
+
+
+def _recurrence_edit_preview(*, db: Session, task: Task) -> dict | None:
+    if task.recurrence_pattern != "weekly" or task.recurrence_parent_id is not None:
+        return None
+
+    recurring_service = RecurringTaskService(db)
+    anchor_date = task.recurrence_anchor_date or task.due_date
+    interval_weeks = task.recurrence_interval_weeks or 1
+    cadence_label = (
+        f"Every week on {anchor_date.strftime('%A')}"
+        if interval_weeks == 1
+        else f"Every {interval_weeks} weeks on {anchor_date.strftime('%A')}"
+    )
+    current_occurrence_number = recurring_service.current_occurrence_index(task) + 1
+    remaining_count_limit_occurrences = recurring_service.remaining_count_limit_occurrences(task)
+    future_occurrence_count = recurring_service.remaining_occurrence_count(task)
+    next_series_due_date = anchor_date + timedelta(weeks=interval_weeks * (current_occurrence_number))
+
+    next_occurrence = recurring_service.preview_next_occurrence(task)
+    if next_occurrence is None:
+        return {
+            "cadence_label": cadence_label,
+            "anchor_label": _format_weekday_date(anchor_date),
+            "current_occurrence_number": current_occurrence_number,
+            "remaining_count_limit_occurrences": remaining_count_limit_occurrences,
+            "future_occurrence_count": future_occurrence_count,
+            "series_due_date_input_value": next_series_due_date.isoformat(),
+            "next_due_label": None,
+            "next_assignment_label": None,
+            "next_assignment_assignee": None,
+        }
+
+    next_assignee = task.assignee
+    if next_occurrence["assignee_id"] is not None and (
+        next_assignee is None or next_assignee.id != next_occurrence["assignee_id"]
+    ):
+        next_assignee = db.get(User, next_occurrence["assignee_id"])
+
+    return {
+        "cadence_label": cadence_label,
+        "anchor_label": _format_weekday_date(anchor_date),
+        "current_occurrence_number": current_occurrence_number,
+        "remaining_count_limit_occurrences": remaining_count_limit_occurrences,
+        "future_occurrence_count": future_occurrence_count,
+        "series_due_date_input_value": next_occurrence["due_date"].isoformat(),
+        "next_due_label": _format_weekday_date(next_occurrence["due_date"]),
+        "next_assignment_label": (
+            _format_weekday_date(next_occurrence["assignment_date"])
+            if next_occurrence["assignment_date"] is not None
+            else None
+        ),
+        "next_assignment_assignee": next_assignee.full_name if next_assignee else None,
+    }
+
+
+def _task_edit_context(
+    *,
+    request: Request,
+    user: User,
+    db: Session,
+    task: Task,
+    redirect_target: str,
+    form_error: str | None,
+) -> dict:
+    _apply_personal_task_highlights(db=db, user=user, tasks=[task])
+    recurrence_preview = _recurrence_edit_preview(db=db, task=task)
+    return {
+        "request": request,
+        "user": user,
+        "task": task,
+        "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
+        "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
+        "form_error": form_error,
+        "personal_highlight_color": getattr(task, "personal_highlight_color", None),
+        "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
+        "recurrence_preview": recurrence_preview,
+        "is_recurring_root": task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None,
+        "recurrence_series_due_date_input_value": (
+            recurrence_preview["series_due_date_input_value"] if recurrence_preview else ""
+        ),
+        "recurrence_count_limit_input_value": (
+            recurrence_preview["remaining_count_limit_occurrences"]
+            if recurrence_preview and recurrence_preview["remaining_count_limit_occurrences"] is not None
+            else (task.recurrence_count_limit or "")
+        ),
+        "redirect_to": redirect_target,
+    }
+
+
 def _quick_schedule_context(
     *,
     db: Session,
@@ -1082,20 +1174,16 @@ def task_edit_page(
     if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
     redirect_target = redirect_to or f"/tasks/{task.id}"
-    _apply_personal_task_highlights(db=db, user=user, tasks=[task])
     return templates.TemplateResponse(
         "tasks/edit.html",
-        {
-            "request": request,
-            "user": user,
-            "task": task,
-            "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-            "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-            "form_error": None,
-            "personal_highlight_color": getattr(task, "personal_highlight_color", None),
-            "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
-            "redirect_to": redirect_target,
-        },
+        _task_edit_context(
+            request=request,
+            user=user,
+            db=db,
+            task=task,
+            redirect_target=redirect_target,
+            form_error=None,
+        ),
     )
 
 
@@ -1110,6 +1198,7 @@ def task_edit_submit(
     status_value: str = Form("pending"),
     repeat_weekly: str = Form("false"),
     recurrence_interval_weeks: str = Form("1"),
+    recurrence_series_due_date: str = Form(""),
     recurrence_until: str = Form(""),
     recurrence_count_limit: str = Form(""),
     recurrence_blocked_behavior: str = Form("skip"),
@@ -1132,20 +1221,16 @@ def task_edit_submit(
         try:
             normalized_highlight_color = AuthService._normalize_hex_color(personal_highlight_color or user.accent_color)
         except ValueError:
-            _apply_personal_task_highlights(db=db, user=user, tasks=[task])
             return templates.TemplateResponse(
                 "tasks/edit.html",
-                {
-                    "request": request,
-                    "user": user,
-                    "task": task,
-                    "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                    "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-                    "form_error": "Please choose a valid personal task highlight colour.",
-                    "personal_highlight_color": getattr(task, "personal_highlight_color", None),
-                    "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
-                    "redirect_to": redirect_target,
-                },
+                _task_edit_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    task=task,
+                    redirect_target=redirect_target,
+                    form_error="Please choose a valid personal task highlight colour.",
+                ),
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1156,18 +1241,14 @@ def task_edit_submit(
     except ValueError:
         return templates.TemplateResponse(
             "tasks/edit.html",
-            {
-                "request": request,
-                "user": user,
-                "task": task,
-                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-                "form_error": "Please provide valid task values before saving.",
-                "personal_highlight_color": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id),
-                "personal_highlight_default": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id)
-                or user.accent_color,
-                "redirect_to": redirect_target,
-            },
+            _task_edit_context(
+                request=request,
+                user=user,
+                db=db,
+                task=task,
+                redirect_target=redirect_target,
+                form_error="Please provide valid task values before saving.",
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1182,20 +1263,52 @@ def task_edit_submit(
     except ValueError:
         return templates.TemplateResponse(
             "tasks/edit.html",
-            {
-                "request": request,
-                "user": user,
-                "task": task,
-                "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
-                "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
-                "form_error": "Please provide valid recurring task settings before saving.",
-                "personal_highlight_color": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id),
-                "personal_highlight_default": UserTaskDisplayService(db).get_highlight_color(user_id=user.id, task_id=task.id)
-                or user.accent_color,
-                "redirect_to": redirect_target,
-            },
+            _task_edit_context(
+                request=request,
+                user=user,
+                db=db,
+                task=task,
+                redirect_target=redirect_target,
+                form_error="Please provide valid recurring task settings before saving.",
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+
+    recurrence_series_due_date_value = None
+    if recurrence_values["recurrence_pattern"] == "weekly" and task.recurrence_pattern == "weekly":
+        try:
+            recurrence_series_due_date_value = date.fromisoformat(
+                recurrence_series_due_date or _recurrence_edit_preview(db=db, task=task)["series_due_date_input_value"]
+            )
+        except (TypeError, ValueError):
+            return templates.TemplateResponse(
+                "tasks/edit.html",
+                _task_edit_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    task=task,
+                    redirect_target=redirect_target,
+                    form_error="Choose a valid future repeat date.",
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        if recurrence_series_due_date_value <= update_due_date:
+            return templates.TemplateResponse(
+                "tasks/edit.html",
+                _task_edit_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    task=task,
+                    redirect_target=redirect_target,
+                    form_error="Future repeats must start after this task's due date.",
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    if recurrence_values["recurrence_count_limit"] is not None and task.recurrence_pattern == "weekly":
+        recurrence_values["recurrence_count_limit"] += RecurringTaskService(db).current_occurrence_index(task)
 
     payload = TaskUpdate(
         title=title,
@@ -1205,7 +1318,7 @@ def task_edit_submit(
         status=update_status,
         **recurrence_values,
     )
-    service.update_task(task, payload)
+    service.update_task(task, payload, recurrence_series_due_date=recurrence_series_due_date_value)
     UserTaskDisplayService(db).set_highlight_color(
         user=user,
         task=task,
