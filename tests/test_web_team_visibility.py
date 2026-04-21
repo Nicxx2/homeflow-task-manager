@@ -1467,10 +1467,8 @@ def test_task_edit_page_shows_current_recurring_summary_and_next_due_date():
         response = client.get(f"/tasks/{task.id}/edit")
 
         next_due = due_day + timedelta(weeks=2)
-        expected_next_due = f"{next_due.strftime('%A')}, {next_due.day} {next_due.strftime('%b %Y')}"
 
         assert response.status_code == 200
-        assert f"Every 2 weeks on {due_day.strftime('%A')}" in response.text
         assert "Due date for this task" in response.text
         assert "Use the recurring section below to change future repeats." in response.text
         assert "Future repeat due date" in response.text
@@ -1478,8 +1476,6 @@ def test_task_edit_page_shows_current_recurring_summary_and_next_due_date():
         assert f'value="{next_due.isoformat()}"' in response.text
         assert "This current task plus 9 more future repeats are left in the series." in response.text
         assert "Occurrences left including this task:" not in response.text
-        assert f"Next due: {expected_next_due}" in response.text
-        assert f"Next due date: {expected_next_due}" not in response.text
         assert "These changes start after this task and leave the current occurrence as-is." in response.text
     finally:
         db.close()

@@ -41,7 +41,7 @@
       {% endfor %}
     </select>
   </div>
-  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if personal_highlight_color %}open{% endif %}>
+  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
     <summary class="cursor-pointer list-none">
       <div class="flex items-center justify-between gap-3">
         <div>
@@ -65,7 +65,7 @@
       </label>
     </div>
   </details>
-  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if task.recurrence_pattern == "weekly" %}open{% endif %}>
+  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
     <summary class="cursor-pointer list-none">
       <div class="flex items-center justify-between gap-3">
         <div>
@@ -76,18 +76,7 @@
           <p class="text-xs text-slate-500 dark:text-slate-400">Open when this task should repeat weekly from the due date.</p>
           {% endif %}
         </div>
-        {% if recurrence_preview %}
-        <div class="text-right text-[11px] leading-5 text-slate-500 dark:text-slate-400">
-          <p>{{ recurrence_preview.cadence_label }}</p>
-          {% if recurrence_preview.next_due_label %}
-          <p>Next due: {{ recurrence_preview.next_due_label }}</p>
-          {% else %}
-          <p>Ends after this task</p>
-          {% endif %}
-        </div>
-        {% else %}
         <span class="text-xs text-slate-500 dark:text-slate-400">{% if task.recurrence_pattern == "weekly" %}Enabled{% else %}Optional{% endif %}</span>
-        {% endif %}
       </div>
     </summary>
     <div class="mt-3">

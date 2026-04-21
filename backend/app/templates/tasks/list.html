@@ -131,9 +131,7 @@
         {% else %}
         <span class="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">Unassigned</span>
         {% endif %}
-        {% if task.recurrence_pattern == "weekly" %}
-        <span>Repeats weekly</span>
-        {% elif task.recurrence_parent_id %}
+        {% if task.recurrence_parent_id %}
         <span>Completed recurring occurrence</span>
         {% endif %}
       </div>
