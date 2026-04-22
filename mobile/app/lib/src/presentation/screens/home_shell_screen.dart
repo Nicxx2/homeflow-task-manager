@@ -89,7 +89,7 @@ class HomeShellScreen extends StatelessWidget {
   }
 }
 
-enum _TodaySection { active, completed }
+enum _TodaySection { active, overdue, completed }
 
 class _TodayTab extends StatefulWidget {
   const _TodayTab();
@@ -104,27 +104,46 @@ class _TodayTabState extends State<_TodayTab> {
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<AppController>();
-    final tasks = controller.todayTasks;
-    final activeTasks =
-        tasks.where((task) => !task.isCompleted).toList(growable: false);
-    final completedTasks =
-        tasks.where((task) => task.isCompleted).toList(growable: false);
-    final visibleTasks =
-        _selectedSection == _TodaySection.active ? activeTasks : completedTasks;
+    final activeTasks = controller.activeTodayTasks;
+    final overdueTasks = controller.overdueTasks;
+    final completedTasks = controller.completedTodayTasks;
+    final showOverdueSection =
+        controller.preferences.showOverdueTasksInTodayView &&
+        overdueTasks.isNotEmpty;
+    final availableSections = <_TodaySection>[
+      _TodaySection.active,
+      if (showOverdueSection) _TodaySection.overdue,
+      _TodaySection.completed,
+    ];
+    final selectedSection = availableSections.contains(_selectedSection)
+        ? _selectedSection
+        : _TodaySection.active;
+    final visibleTasks = switch (selectedSection) {
+      _TodaySection.active => activeTasks,
+      _TodaySection.overdue => overdueTasks,
+      _TodaySection.completed => completedTasks,
+    };
     final now = DateTime.now().toUtc();
     final today = DateTime.utc(now.year, now.month, now.day);
-    final emptyMessage = _selectedSection == _TodaySection.active
-        ? (completedTasks.isNotEmpty
-            ? 'No active tasks remain for today.'
-            : controller.messageForDay(today))
-        : 'No tasks have been completed today yet.';
+    final emptyMessage = switch (selectedSection) {
+      _TodaySection.active => completedTasks.isNotEmpty || overdueTasks.isNotEmpty
+          ? 'No active tasks remain for today.'
+          : controller.messageForDay(today),
+      _TodaySection.overdue => 'No overdue tasks right now.',
+      _TodaySection.completed => 'No tasks have been completed today yet.',
+    };
 
     return ListView(
       children: [
         Text('Today', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text(
-          '${DateFormat('EEEE, dd MMM').format(DateTime.now())}  |  ${activeTasks.length} active  |  ${completedTasks.length} completed',
+          [
+            DateFormat('EEEE, dd MMM').format(DateTime.now()),
+            '${activeTasks.length} active',
+            if (showOverdueSection) '${overdueTasks.length} overdue',
+            '${completedTasks.length} completed',
+          ].join('  |  '),
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
@@ -135,12 +154,17 @@ class _TodayTabState extends State<_TodayTab> {
               value: _TodaySection.active,
               label: Text('Active ${activeTasks.length}'),
             ),
+            if (showOverdueSection)
+              ButtonSegment<_TodaySection>(
+                value: _TodaySection.overdue,
+                label: Text('Overdue ${overdueTasks.length}'),
+              ),
             ButtonSegment<_TodaySection>(
               value: _TodaySection.completed,
               label: Text('Completed ${completedTasks.length}'),
             ),
           ],
-          selected: <_TodaySection>{_selectedSection},
+          selected: <_TodaySection>{selectedSection},
           onSelectionChanged: (selection) {
             if (selection.isNotEmpty) {
               setState(() {
@@ -153,7 +177,7 @@ class _TodayTabState extends State<_TodayTab> {
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 180),
           child: TaskPreviewList(
-            key: ValueKey<_TodaySection>(_selectedSection),
+            key: ValueKey<_TodaySection>(selectedSection),
             tasks: visibleTasks,
             emptyMessage: emptyMessage,
             isUpdatingTask: controller.isUpdatingTask,
@@ -316,6 +340,16 @@ class _SettingsTab extends StatelessWidget {
                   controller.cacheWindowEnd == null
               ? 'No cached window yet'
               : '${formatDateOnlyLabel(controller.cacheWindowStart!, 'dd MMM')} to ${formatDateOnlyLabel(controller.cacheWindowEnd!, 'dd MMM')}',
+        ),
+        Card(
+          child: SwitchListTile(
+            title: const Text('Show overdue in Today view'),
+            subtitle: const Text(
+              'Keep overdue tasks in a separate Today section when any exist.',
+            ),
+            value: controller.preferences.showOverdueTasksInTodayView,
+            onChanged: controller.setShowOverdueTasksInTodayView,
+          ),
         ),
         Card(
           child: ExpansionTile(

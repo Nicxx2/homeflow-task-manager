@@ -1,7 +1,22 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:homeflow_mobile/src/application/app_controller.dart';
+import 'package:homeflow_mobile/src/application/app_services.dart';
 import 'package:homeflow_mobile/src/core/date_display.dart';
 import 'package:homeflow_mobile/src/core/models/app_preferences.dart';
+import 'package:homeflow_mobile/src/core/models/mobile_task.dart';
 import 'package:homeflow_mobile/src/core/models/saved_login.dart';
+import 'package:homeflow_mobile/src/data/repositories/connection_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/preferences_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/saved_login_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/session_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/task_cache_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/widget_state_repository.dart';
+import 'package:homeflow_mobile/src/data/storage/in_memory_local_store.dart';
+import 'package:homeflow_mobile/src/data/storage/in_memory_secure_store.dart';
+import 'package:homeflow_mobile/src/presentation/screens/home_shell_screen.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 
 void main() {
   test('offline task window maps to expected day counts', () {
@@ -16,6 +31,7 @@ void main() {
       offlineTaskWindow: OfflineTaskWindow.days14,
       autoRefreshOnOpen: false,
       themeMode: AppThemeMode.dark,
+      showOverdueTasksInTodayView: false,
       dailyReminderEnabled: true,
       dailyReminderMinutesAfterMidnight: 9 * 60 + 30,
     );
@@ -25,6 +41,7 @@ void main() {
     expect(restored.offlineTaskWindow, OfflineTaskWindow.days14);
     expect(restored.autoRefreshOnOpen, isFalse);
     expect(restored.themeMode, AppThemeMode.dark);
+    expect(restored.showOverdueTasksInTodayView, isFalse);
     expect(restored.dailyReminderEnabled, isTrue);
     expect(restored.dailyReminderMinutesAfterMidnight, (9 * 60) + 30);
   });
@@ -47,4 +64,227 @@ void main() {
     expect(formatDateOnlyLabel(value, 'dd MMM yyyy'), '20 Apr 2026');
     expect(formatWeekdayLabelLower(value), 'monday');
   });
+
+  testWidgets('today tab shows overdue section only when overdue tasks exist', (
+    tester,
+  ) async {
+    final controller = _FakeAppController(
+      _buildServices(),
+      preferences: AppPreferences.defaults(),
+      active: [
+        _task(
+          id: 1,
+          title: 'Today task',
+          bucket: 'today',
+          dueDate: DateTime.utc(2026, 4, 22),
+          assignmentDate: DateTime.utc(2026, 4, 22),
+        ),
+      ],
+      overdue: [
+        _task(
+          id: 2,
+          title: 'Overdue task',
+          bucket: 'overdue',
+          dueDate: DateTime.utc(2026, 4, 21),
+          assignmentDate: DateTime.utc(2026, 4, 21),
+        ),
+      ],
+      completed: [
+        _task(
+          id: 3,
+          title: 'Completed task',
+          bucket: 'completed',
+          dueDate: DateTime.utc(2026, 4, 22),
+          assignmentDate: DateTime.utc(2026, 4, 22),
+          status: MobileTaskStatus.completed,
+          isCompleted: true,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppController>.value(
+        value: controller,
+        child: const MaterialApp(home: HomeShellScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Active 1'), findsOneWidget);
+    expect(find.text('Overdue 1'), findsOneWidget);
+    expect(find.text('Completed 1'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('today tab hides overdue section when there are no overdue tasks', (
+    tester,
+  ) async {
+    final controller = _FakeAppController(
+      _buildServices(),
+      preferences: AppPreferences.defaults(),
+      active: [
+        _task(
+          id: 1,
+          title: 'Today task',
+          bucket: 'today',
+          dueDate: DateTime.utc(2026, 4, 22),
+          assignmentDate: DateTime.utc(2026, 4, 22),
+        ),
+      ],
+      overdue: const [],
+      completed: [
+        _task(
+          id: 3,
+          title: 'Completed task',
+          bucket: 'completed',
+          dueDate: DateTime.utc(2026, 4, 22),
+          assignmentDate: DateTime.utc(2026, 4, 22),
+          status: MobileTaskStatus.completed,
+          isCompleted: true,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppController>.value(
+        value: controller,
+        child: const MaterialApp(home: HomeShellScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Active 1'), findsOneWidget);
+    expect(find.text('Overdue 1'), findsNothing);
+    expect(find.text('Completed 1'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+    'today tab hides overdue section when preference is disabled',
+    (tester) async {
+      final controller = _FakeAppController(
+        _buildServices(),
+        preferences: AppPreferences.defaults().copyWith(
+          showOverdueTasksInTodayView: false,
+        ),
+        active: [
+          _task(
+            id: 1,
+            title: 'Today task',
+            bucket: 'today',
+            dueDate: DateTime.utc(2026, 4, 22),
+            assignmentDate: DateTime.utc(2026, 4, 22),
+          ),
+        ],
+        overdue: [
+          _task(
+            id: 2,
+            title: 'Overdue task',
+            bucket: 'overdue',
+            dueDate: DateTime.utc(2026, 4, 21),
+            assignmentDate: DateTime.utc(2026, 4, 21),
+          ),
+        ],
+        completed: const [],
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppController>.value(
+          value: controller,
+          child: const MaterialApp(home: HomeShellScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.text('Active 1'), findsOneWidget);
+      expect(find.text('Overdue 1'), findsNothing);
+
+      controller.dispose();
+    },
+  );
+}
+
+MobileTask _task({
+  required int id,
+  required String title,
+  required String bucket,
+  required DateTime dueDate,
+  required DateTime assignmentDate,
+  MobileTaskStatus status = MobileTaskStatus.pending,
+  bool isCompleted = false,
+}) {
+  return MobileTask(
+    id: id,
+    title: title,
+    description: 'Task description',
+    status: status,
+    dueDate: dueDate,
+    assignmentDate: assignmentDate,
+    assigneeId: 1,
+    effortLevel: EffortLevel.medium,
+    pointsValue: 5,
+    updatedAt: DateTime.now().toUtc(),
+    isOverdue: bucket == 'overdue',
+    isCompleted: isCompleted,
+    displayBucket: bucket,
+    sortKey: '$bucket:$id',
+    recurrenceParentId: null,
+    recurrenceSummary: null,
+  );
+}
+
+class _FakeAppController extends AppController {
+  _FakeAppController(
+    super.services, {
+    required AppPreferences preferences,
+    required List<MobileTask> active,
+    required List<MobileTask> overdue,
+    required List<MobileTask> completed,
+  }) : _preferences = preferences,
+       _active = active,
+       _overdue = overdue,
+       _completed = completed;
+
+  final AppPreferences _preferences;
+  final List<MobileTask> _active;
+  final List<MobileTask> _overdue;
+  final List<MobileTask> _completed;
+
+  @override
+  AppPreferences get preferences => _preferences;
+
+  @override
+  List<MobileTask> get activeTodayTasks => _active;
+
+  @override
+  List<MobileTask> get overdueTasks => _overdue;
+
+  @override
+  List<MobileTask> get completedTodayTasks => _completed;
+
+  @override
+  String messageForDay(DateTime day) => 'No tasks for this day in the current cache window.';
+}
+
+AppServices _buildServices() {
+  final localStore = InMemoryLocalStore();
+  final secureStore = InMemorySecureStore();
+
+  return AppServices(
+    connectionRepository: ConnectionRepository(
+      localStore,
+      secureStore: secureStore,
+    ),
+    savedLoginRepository: SavedLoginRepository(secureStore),
+    sessionRepository: SessionRepository(secureStore),
+    preferencesRepository: PreferencesRepository(localStore),
+    taskCacheRepository: TaskCacheRepository(localStore),
+    widgetStateRepository: WidgetStateRepository(localStore),
+    httpClient: http.Client(),
+  );
 }

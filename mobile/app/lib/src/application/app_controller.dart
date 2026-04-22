@@ -116,21 +116,29 @@ class AppController extends ChangeNotifier {
         age > const Duration(hours: 6);
   }
 
-  List<MobileTask> get todayTasks {
+  List<MobileTask> get activeTodayTasks {
+    final tasks = _cacheSnapshot?.tasks ?? const <MobileTask>[];
+    return tasks
+        .where((task) => task.displayBucket == 'today' && !task.isCompleted)
+        .toList(growable: false);
+  }
+
+  List<MobileTask> get overdueTasks {
+    final tasks = _cacheSnapshot?.tasks ?? const <MobileTask>[];
+    return tasks
+        .where((task) => task.displayBucket == 'overdue' && !task.isCompleted)
+        .toList(growable: false);
+  }
+
+  List<MobileTask> get completedTodayTasks {
     final today = _todayUtc();
     final tasks = _cacheSnapshot?.tasks ?? const <MobileTask>[];
     return tasks.where((task) {
+      if (task.displayBucket != 'completed') {
+        return false;
+      }
       final assignment = _dateOnly(task.assignmentDate ?? task.dueDate);
-      if (task.displayBucket == 'overdue') {
-        return true;
-      }
-      if (task.displayBucket == 'today') {
-        return true;
-      }
-      if (task.displayBucket == 'completed') {
-        return assignment.isAtSameMomentAs(today);
-      }
-      return false;
+      return assignment.isAtSameMomentAs(today);
     }).toList(growable: false);
   }
 
@@ -622,6 +630,15 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setShowOverdueTasksInTodayView(bool value) async {
+    if (value == _preferences.showOverdueTasksInTodayView) {
+      return;
+    }
+    _preferences = _preferences.copyWith(showOverdueTasksInTodayView: value);
+    await _services.preferencesRepository.save(_preferences);
+    notifyListeners();
+  }
+
   Future<void> setDailyReminderEnabled(bool value) async {
     if (value == _preferences.dailyReminderEnabled) {
       return;
@@ -809,8 +826,7 @@ class AppController extends ChangeNotifier {
     final now = DateTime.now().toUtc();
     final session = _session;
     final snapshot = _cacheSnapshot;
-    final activeTodayTasks =
-        todayTasks.where((task) => !task.isCompleted).toList(growable: false);
+    final activeTodayTasks = this.activeTodayTasks;
     final previewTitles = activeTodayTasks
         .take(3)
         .map((task) => task.title)
@@ -1044,7 +1060,7 @@ class AppController extends ChangeNotifier {
   int _activeTaskCountForReminderDay(DateTime day) {
     final target = DateTime.utc(day.year, day.month, day.day);
     if (target.isAtSameMomentAs(_todayUtc())) {
-      return todayTasks.where((task) => !task.isCompleted).length;
+      return activeTodayTasks.length;
     }
     return tasksForDate(target).where((task) => !task.isCompleted).length;
   }

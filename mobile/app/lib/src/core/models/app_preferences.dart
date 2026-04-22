@@ -40,6 +40,7 @@ class AppPreferences {
     required this.offlineTaskWindow,
     required this.autoRefreshOnOpen,
     required this.themeMode,
+    required this.showOverdueTasksInTodayView,
     required this.dailyReminderEnabled,
     required this.dailyReminderMinutesAfterMidnight,
   });
@@ -49,6 +50,7 @@ class AppPreferences {
       offlineTaskWindow: OfflineTaskWindow.days7,
       autoRefreshOnOpen: true,
       themeMode: AppThemeMode.system,
+      showOverdueTasksInTodayView: true,
       dailyReminderEnabled: false,
       dailyReminderMinutesAfterMidnight: 8 * 60,
     );
@@ -61,6 +63,8 @@ class AppPreferences {
       ),
       autoRefreshOnOpen: json['autoRefreshOnOpen'] as bool? ?? true,
       themeMode: AppThemeMode.fromValue(json['themeMode'] as String?),
+      showOverdueTasksInTodayView:
+          json['showOverdueTasksInTodayView'] as bool? ?? true,
       dailyReminderEnabled: json['dailyReminderEnabled'] as bool? ?? false,
       dailyReminderMinutesAfterMidnight:
           json['dailyReminderMinutesAfterMidnight'] as int? ?? 8 * 60,
@@ -70,6 +74,7 @@ class AppPreferences {
   final OfflineTaskWindow offlineTaskWindow;
   final bool autoRefreshOnOpen;
   final AppThemeMode themeMode;
+  final bool showOverdueTasksInTodayView;
   final bool dailyReminderEnabled;
   final int dailyReminderMinutesAfterMidnight;
 
@@ -78,6 +83,7 @@ class AppPreferences {
       'offlineTaskWindowDays': offlineTaskWindow.days,
       'autoRefreshOnOpen': autoRefreshOnOpen,
       'themeMode': themeMode.value,
+      'showOverdueTasksInTodayView': showOverdueTasksInTodayView,
       'dailyReminderEnabled': dailyReminderEnabled,
       'dailyReminderMinutesAfterMidnight': dailyReminderMinutesAfterMidnight,
     };
@@ -87,6 +93,7 @@ class AppPreferences {
     OfflineTaskWindow? offlineTaskWindow,
     bool? autoRefreshOnOpen,
     AppThemeMode? themeMode,
+    bool? showOverdueTasksInTodayView,
     bool? dailyReminderEnabled,
     int? dailyReminderMinutesAfterMidnight,
   }) {
@@ -94,6 +101,8 @@ class AppPreferences {
       offlineTaskWindow: offlineTaskWindow ?? this.offlineTaskWindow,
       autoRefreshOnOpen: autoRefreshOnOpen ?? this.autoRefreshOnOpen,
       themeMode: themeMode ?? this.themeMode,
+      showOverdueTasksInTodayView:
+          showOverdueTasksInTodayView ?? this.showOverdueTasksInTodayView,
       dailyReminderEnabled: dailyReminderEnabled ?? this.dailyReminderEnabled,
       dailyReminderMinutesAfterMidnight:
           dailyReminderMinutesAfterMidnight ??
