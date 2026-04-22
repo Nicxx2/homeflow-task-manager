@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from backend.app.api.web.views import _dashboard_workload_status
 from backend.app.db.base import Base
 from backend.app.db.session import SessionLocal, engine
 from backend.app.main import app
@@ -188,6 +189,61 @@ def test_dashboard_next_task_skips_completed_tasks():
         assert response.status_code == 200
         assert f"Next task: Still Open {token}" in response.text
         assert f"Next task: Done First {token}" not in response.text
+    finally:
+        db.close()
+
+
+def test_dashboard_workload_status_boundaries():
+    assert _dashboard_workload_status(remaining_capacity=None, schedule_block=None) == ("Capacity unset", "slate")
+    assert _dashboard_workload_status(remaining_capacity=-1, schedule_block=None) == ("Over", "red")
+    assert _dashboard_workload_status(remaining_capacity=0, schedule_block=None) == ("Full", "amber")
+    assert _dashboard_workload_status(remaining_capacity=1, schedule_block=None) == ("Nearly full", "amber")
+    assert _dashboard_workload_status(remaining_capacity=2, schedule_block=None) == ("Nearly full", "amber")
+    assert _dashboard_workload_status(remaining_capacity=3, schedule_block=None) == ("Free", "emerald")
+
+
+def test_dashboard_workload_status_away_takes_precedence():
+    schedule_block = {"type": "away", "message": "Away today"}
+    assert _dashboard_workload_status(remaining_capacity=0, schedule_block=schedule_block) == ("Away", "amber")
+    assert _dashboard_workload_status(remaining_capacity=-5, schedule_block=schedule_block) == ("Away", "amber")
+
+
+def test_dashboard_marks_exact_capacity_as_full():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"dashboard-full-viewer-{token}@example.com",
+            full_name="Dashboard Full Viewer",
+            capacity=8,
+            show_in_member_lists=False,
+        )
+        teammate = _create_user(
+            db,
+            email=f"dashboard-full-mate-{token}@example.com",
+            full_name="Dashboard Full Mate",
+            capacity=8,
+        )
+        day = date.today()
+        _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Exactly Full {token}",
+            day=day,
+            effort_level=EffortLevel.HIGH,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert "Dashboard Full Mate" in response.text
+        assert "Full" in response.text
+        assert "Nearly full" not in response.text
+        assert "Remaining: 0 pts left" in response.text
     finally:
         db.close()
 

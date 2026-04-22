@@ -341,6 +341,24 @@ def _format_weekday_date(value: date) -> str:
     return f"{value.strftime('%A')}, {value.day} {value.strftime('%b %Y')}"
 
 
+def _dashboard_workload_status(
+    *,
+    remaining_capacity: int | None,
+    schedule_block: dict | None,
+) -> tuple[str, str]:
+    if schedule_block and schedule_block.get("type") == "away":
+        return "Away", "amber"
+    if remaining_capacity is None:
+        return "Capacity unset", "slate"
+    if remaining_capacity < 0:
+        return "Over", "red"
+    if remaining_capacity == 0:
+        return "Full", "amber"
+    if remaining_capacity <= 2:
+        return "Nearly full", "amber"
+    return "Free", "emerald"
+
+
 def _recurrence_edit_preview(*, db: Session, task: Task) -> dict | None:
     if task.recurrence_pattern != "weekly" or task.recurrence_parent_id is not None:
         return None
@@ -666,23 +684,10 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
         tasks_today = _sort_tasks_by_planned_date(workload.get_tasks_for_user_on_date(user_id=item.id, date_value=today))
         next_task = next((task for task in tasks_today if task.status != TaskStatus.COMPLETED), None)
         _apply_personal_task_highlights(db=db, user=user, tasks=tasks_today)
-        status_label = "Capacity unset"
-        status_tone = "slate"
-        if schedule_block and schedule_block.get("type") == "away":
-            status_label = "Away"
-            status_tone = "amber"
-        elif remaining_capacity is None:
-            status_label = "Capacity unset"
-            status_tone = "slate"
-        elif remaining_capacity < 0:
-            status_label = "Over"
-            status_tone = "red"
-        elif remaining_capacity <= 2:
-            status_label = "Nearly full"
-            status_tone = "amber"
-        else:
-            status_label = "Free"
-            status_tone = "emerald"
+        status_label, status_tone = _dashboard_workload_status(
+            remaining_capacity=remaining_capacity,
+            schedule_block=schedule_block,
+        )
         today_workload.append(
             {
                 "user": item,
@@ -698,7 +703,7 @@ def dashboard(request: Request, user: User = Depends(get_current_user), db: Sess
                 "schedule_block": schedule_block,
             }
         )
-    status_rank = {"Over": 0, "Nearly full": 1, "Free": 2, "Capacity unset": 3, "Away": 4}
+    status_rank = {"Over": 0, "Full": 1, "Nearly full": 2, "Free": 3, "Capacity unset": 4, "Away": 5}
     today_workload.sort(key=lambda row: (status_rank.get(row["status_label"], 5), row["user"].full_name.lower()))
     return templates.TemplateResponse(
         "dashboard.html",

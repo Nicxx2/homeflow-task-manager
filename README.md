@@ -196,7 +196,7 @@ If someone is away or has blocked days
 
 ---
 
-## ✨ What is new in v2.3.3
+## ✨ What is new in v2.3.4
 
 - Faster scheduling directly from the web Tasks page with a compact calendar action on each task card.
 - Optional assign-on-create flow so a task can be planned immediately without leaving creation.
