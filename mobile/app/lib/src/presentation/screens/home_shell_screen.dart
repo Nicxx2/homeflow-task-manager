@@ -138,12 +138,7 @@ class _TodayTabState extends State<_TodayTab> {
         Text('Today', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text(
-          [
-            DateFormat('EEEE, dd MMM').format(DateTime.now()),
-            '${activeTasks.length} active',
-            if (showOverdueSection) '${overdueTasks.length} overdue',
-            '${completedTasks.length} completed',
-          ].join('  |  '),
+          DateFormat('EEEE, dd MMM').format(DateTime.now()),
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
