@@ -196,15 +196,14 @@ If someone is away or has blocked days
 
 ---
 
-## ✨ What is new in v2.3.6
+## ✨ What is new in v2.4
 
-- Faster scheduling directly from the web Tasks page with a compact calendar action on each task card.
-- Optional assign-on-create flow so a task can be planned immediately without leaving creation.
-- Quick due date and assignment updates from both the Tasks page and Day View with the same minimalist schedule popover.
-- Clearer recurring-task editing that separates current-occurrence scheduling from future repeat settings, with better remaining-occurrence guidance.
-- Temporary extra capacity on specific days or short date ranges without changing a member's base admin-set capacity.
-- Better next-available suggestions that now account for temporary extra capacity as well as blocked days and existing workload.
-- Cleaner task detail flow with clearer assignment handling, safer deletion, and preserved recurring-task history where appropriate.
+- Edit task now uses the same familiar assign-now flow as task creation, with current assignee and assignment date prefilled when a task is already planned.
+- Assignment changes made during editing now re-check availability correctly when the assignee, assignment day, or effort level changes, with the same next-free suggestion flow used elsewhere in the app.
+- Past due dates can now be recorded cleanly for overdue work, while assignment planning stays on valid future-facing dates across the app's scheduling shortcuts.
+- Admins can now remove users safely from the admin panel without deleting tasks. Assigned tasks become unassigned, assignment dates are cleared, and created tasks stay in the system.
+- Admins can now control the public login page: show or hide registration, auto-approve new registrations, apply a default daily capacity for new public accounts, and choose the default login-page theme.
+- When public registration is turned off, the login page switches to a cleaner sign-in-only layout while still handling direct registration attempts safely.
 
 ---
 
@@ -215,19 +214,30 @@ If someone is away or has blocked days
 - Effort-based planning with daily workload protection
 - Automatic next-available scheduling suggestions
 - Quick status changes from list and day views
+- Familiar create and edit flows for assignment planning
 - Recurring task support with one active occurrence instead of cluttering the task list
-- Admin controls for users, capacity, visibility, and AI settings
+- Admin controls for users, login access, registration defaults, capacity, visibility, and AI settings
 - Personal UI customization without affecting other users
 
 ### Smart scheduling
 
 The app is designed to plan around real-life availability, not just due dates.
 
+- allows past due dates when you need to keep overdue work accurate
 - prevents assignment to past dates
 - avoids blocked weekdays and away periods
 - checks daily capacity before assigning work
 - suggests the next valid day when the chosen one does not fit
 - allows controlled override only when the rules permit it
+
+### Admin controls
+
+- approve or auto-approve registrations
+- show or hide public registration on the login page
+- apply a default daily capacity to new public registrations
+- choose the default theme for the login page
+- remove users safely without deleting their tasks
+- manage member visibility, capacities, and AI behavior
 
 ### Recurring tasks
 

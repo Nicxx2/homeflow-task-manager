@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="min-h-[70vh] grid place-items-center">
-  <div class="w-full max-w-4xl grid gap-6 md:grid-cols-2">
+  <div class="w-full {% if public_registration_enabled %}max-w-4xl grid gap-6 md:grid-cols-2{% else %}max-w-xl{% endif %}">
+    {% if register_success %}
+    <div class="{% if public_registration_enabled %}md:col-span-2{% endif %} rounded-md bg-emerald-50 text-emerald-700 px-3 py-2 text-sm">{{ register_success }}</div>
+    {% endif %}
+    {% if register_error %}
+    <div class="{% if public_registration_enabled %}md:col-span-2{% endif %} rounded-md bg-red-50 text-red-700 px-3 py-2 text-sm">{{ register_error }}</div>
+    {% endif %}
+
     <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 dark:bg-slate-900 dark:border-slate-800">
       <h1 class="text-2xl font-semibold mb-1">Welcome back</h1>
       <p class="text-slate-500 dark:text-slate-400 mb-6">Sign in to continue managing tasks.</p>
@@ -25,16 +32,16 @@
       </form>
     </section>
 
+    {% if public_registration_enabled %}
     <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 dark:bg-slate-900 dark:border-slate-800">
       <h2 class="text-2xl font-semibold mb-1">Create an account</h2>
-      <p class="text-slate-500 dark:text-slate-400 mb-6">New accounts require admin approval before they can sign in.</p>
-
-      {% if register_success %}
-        <div class="mb-4 rounded-md bg-emerald-50 text-emerald-700 px-3 py-2 text-sm">{{ register_success }}</div>
-      {% endif %}
-      {% if register_error %}
-        <div class="mb-4 rounded-md bg-red-50 text-red-700 px-3 py-2 text-sm">{{ register_error }}</div>
-      {% endif %}
+      <p class="text-slate-500 dark:text-slate-400 mb-6">
+        {% if auto_approve_registrations %}
+        New accounts are auto-approved and can sign in straight away.
+        {% else %}
+        New accounts require admin approval before they can sign in.
+        {% endif %}
+      </p>
 
       <form method="post" action="/register" class="space-y-4">
         <div>
@@ -54,6 +61,7 @@
         </button>
       </form>
     </section>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

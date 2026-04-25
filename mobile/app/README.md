@@ -44,10 +44,13 @@ Typical workflow:
 
 1. start the backend with Docker Compose from the repo root
 2. find the server machine's local IP address
-3. install the APK on an Android device
-4. in the app, enter the server host, port, email, and password
+3. make sure you have an existing approved Homeflow account on that server
+4. install the APK on an Android device
+5. in the app, enter the server host, port, email, and password
 
 If you are testing from a phone on the same local network, use the computer's LAN IP, not `localhost`.
+
+Public registration can be hidden or disabled by the server admin, so mobile setup should not rely on self-signup being available.
 
 ## iPhone / iOS Note
 

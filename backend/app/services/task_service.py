@@ -269,6 +269,7 @@ class TaskService:
         assignee_id: int | None,
         assignment_date: date | None,
         allow_policy_override: bool = False,
+        task_points: int | None = None,
     ) -> tuple[bool, dict]:
         if assignee_id is not None:
             if assignment_date is None:
@@ -279,7 +280,7 @@ class TaskService:
             validation = WorkloadService(self.db).validate_assignment(
                 user_id=assignee_id,
                 date_value=assignment_date,
-                task_points=task.points_value,
+                task_points=task_points if task_points is not None else task.points_value,
                 exclude_task_id=task.id,
                 allow_policy_override=allow_policy_override,
             )

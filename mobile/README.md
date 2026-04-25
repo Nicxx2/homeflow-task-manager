@@ -18,6 +18,7 @@ Recommended reading order:
 Current mobile scope:
 
 - secure sign-in to the user's own server
+- sign-in assumes an existing approved account on that server
 - saved login and session restoration on app reopen
 - today-first task workflow
 - upcoming task view

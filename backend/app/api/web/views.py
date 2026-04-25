@@ -149,13 +149,16 @@ def _admin_settings_context(
         "user_caps": service.get_member_users_with_capacities(),
         "all_users": all_users,
         "pending_users": service.get_pending_users(),
+        "app_settings": service.get_app_settings(),
         "ai_settings": service.get_ai_settings(),
-        "ai_models": service.get_ai_registry_models(),
+        "ai_models": service.get_ai_registry_models(auto_refresh_if_empty=True),
         "ai_health": service.get_ai_health(),
         "ai_errors_initial": ai_errors[:3],
         "ai_errors_more": ai_errors[3:],
         "ai_test_result": ai_test_result,
         "user_create_result": None,
+        "user_management_result": None,
+        "login_access_result": None,
     }
 
 
@@ -197,6 +200,12 @@ def _appearance_page_context(*, request: Request, user: User, form_error: str | 
 
 def _initial_assignment_date_for_task(task) -> str:
     return (task.assignment_date or date.today()).isoformat()
+
+
+def _assignment_date_min_for_task(task) -> str:
+    if task.assignment_date and task.assignment_date < date.today():
+        return task.assignment_date.isoformat()
+    return date.today().isoformat()
 
 
 def _initial_quick_assignment_date_for_task(task) -> str:
@@ -421,9 +430,36 @@ def _task_edit_context(
     task: Task,
     redirect_target: str,
     form_error: str | None,
+    form_values: dict | None = None,
+    assignment_feedback: dict | None = None,
 ) -> dict:
     _apply_personal_task_highlights(db=db, user=user, tasks=[task])
     recurrence_preview = _recurrence_edit_preview(db=db, task=task)
+    values = {
+        "title": task.title,
+        "description": task.description,
+        "due_date": task.due_date.isoformat(),
+        "effort_level": task.effort_level.value,
+        "status_value": task.status.value,
+        "repeat_weekly": task.recurrence_pattern == "weekly",
+        "recurrence_interval_weeks": str(task.recurrence_interval_weeks or 1),
+        "recurrence_series_due_date": (
+            recurrence_preview["series_due_date_input_value"] if recurrence_preview else ""
+        ),
+        "recurrence_until": task.recurrence_until.isoformat() if task.recurrence_until else "",
+        "recurrence_count_limit": (
+            str(recurrence_preview["remaining_count_limit_occurrences"])
+            if recurrence_preview and recurrence_preview["remaining_count_limit_occurrences"] is not None
+            else (str(task.recurrence_count_limit) if task.recurrence_count_limit is not None else "")
+        ),
+        "recurrence_blocked_behavior": task.recurrence_blocked_behavior or "skip",
+        "use_personal_highlight": getattr(task, "personal_highlight_color", None) is not None,
+        "personal_highlight_color": getattr(task, "personal_highlight_color", None) or user.accent_color,
+        "assignee_id_edit": str(task.assignee_id) if task.assignee_id is not None else "",
+        "assignment_date_edit": _initial_assignment_date_for_task(task),
+    }
+    if form_values:
+        values.update(form_values)
     return {
         "request": request,
         "user": user,
@@ -431,6 +467,10 @@ def _task_edit_context(
         "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
         "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
         "form_error": form_error,
+        "form_values": values,
+        "assignment_feedback": assignment_feedback,
+        "assignable_users": _assignable_users_for_task(db, task),
+        "assignment_date_min": _assignment_date_min_for_task(task),
         "personal_highlight_color": getattr(task, "personal_highlight_color", None),
         "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
         "recurrence_preview": recurrence_preview,
@@ -460,7 +500,15 @@ def _quick_schedule_context(
     selected_assignment_date: date | None = None,
 ) -> dict:
     effective_assignee_id = selected_assignee_id if selected_assignee_id is not None else task.assignee_id
-    effective_assignment_date = selected_assignment_date or task.assignment_date
+    effective_assignment_date = (
+        selected_assignment_date
+        if selected_assignment_date is not None
+        else (
+            task.assignment_date
+            if task.assignment_date and task.assignment_date >= date.today()
+            else date.today()
+        )
+    )
     effective_feedback = assignment_feedback
     if effective_feedback is None and effective_assignee_id is not None and effective_assignment_date is not None:
         effective_feedback = WorkloadService(db).validate_assignment(
@@ -576,17 +624,35 @@ def _sync_recurring_tasks(db: Session) -> None:
     RecurringTaskService(db).sync()
 
 
+def _login_page_context(
+    *,
+    request: Request,
+    db: Session,
+    error: str | None = None,
+    register_error: str | None = None,
+    register_success: str | None = None,
+) -> dict:
+    auth_service = AuthService(db)
+    return {
+        "request": request,
+        "error": error,
+        "register_error": register_error,
+        "register_success": register_success,
+        "auto_approve_registrations": auth_service.get_auto_approve_registrations(),
+        "public_registration_enabled": auth_service.get_public_registration_enabled(),
+        "login_theme_preference": auth_service.get_login_theme_preference(),
+        "show_nav": False,
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
-    return templates.TemplateResponse(
-        "login.html",
-        {"request": request, "error": None, "register_error": None, "register_success": None, "show_nav": False},
-    )
+def login_page(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse("login.html", _login_page_context(request=request, db=db))
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -602,13 +668,11 @@ def login_submit(
         denial_reason = service.get_login_denial_reason(email, password)
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "error": denial_reason or "Invalid email or password.",
-                "register_error": None,
-                "register_success": None,
-                "show_nav": False,
-            },
+            _login_page_context(
+                request=request,
+                db=db,
+                error=denial_reason or "Invalid email or password.",
+            ),
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -628,29 +692,40 @@ def register_submit(
     db: Session = Depends(get_db),
 ):
     service = AuthService(db)
-    try:
-        service.register(RegisterRequest(email=email, full_name=full_name, password=password))
+    if not service.get_public_registration_enabled():
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "error": None,
-                "register_error": None,
-                "register_success": "Registration request sent. An admin must approve your account before you can sign in.",
-                "show_nav": False,
-            },
+            _login_page_context(
+                request=request,
+                db=db,
+                register_error="Registration is currently closed.",
+            ),
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        created_user = service.register(RegisterRequest(email=email, full_name=full_name, password=password))
+        success_message = (
+            "Registration complete. Your account was auto-approved and you can sign in now."
+            if created_user.approval_status == AuthService.APPROVAL_APPROVED
+            else "Registration request sent. An admin must approve your account before you can sign in."
+        )
+        return templates.TemplateResponse(
+            "login.html",
+            _login_page_context(
+                request=request,
+                db=db,
+                register_success=success_message,
+            ),
             status_code=status.HTTP_201_CREATED,
         )
     except ValueError as exc:
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "error": None,
-                "register_error": str(exc),
-                "register_success": None,
-                "show_nav": False,
-            },
+            _login_page_context(
+                request=request,
+                db=db,
+                register_error=str(exc),
+            ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1188,6 +1263,8 @@ def task_edit_page(
             task=task,
             redirect_target=redirect_target,
             form_error=None,
+            form_values=None,
+            assignment_feedback=None,
         ),
     )
 
@@ -1209,6 +1286,8 @@ def task_edit_submit(
     recurrence_blocked_behavior: str = Form("skip"),
     use_personal_highlight: str = Form("false"),
     personal_highlight_color: str = Form(""),
+    assignee_id_edit: str = Form(""),
+    assignment_date_edit: str = Form(""),
     redirect_to: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -1220,6 +1299,23 @@ def task_edit_submit(
     if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
     redirect_target = redirect_to or f"/tasks/{task.id}"
+    form_values = {
+        "title": title,
+        "description": description,
+        "due_date": due_date,
+        "effort_level": effort_level,
+        "status_value": status_value,
+        "repeat_weekly": repeat_weekly.lower() in {"true", "on", "1", "yes"},
+        "recurrence_interval_weeks": recurrence_interval_weeks,
+        "recurrence_series_due_date": recurrence_series_due_date,
+        "recurrence_until": recurrence_until,
+        "recurrence_count_limit": recurrence_count_limit,
+        "recurrence_blocked_behavior": recurrence_blocked_behavior,
+        "use_personal_highlight": use_personal_highlight.lower() in {"true", "on", "1", "yes"},
+        "personal_highlight_color": personal_highlight_color or user.accent_color,
+        "assignee_id_edit": assignee_id_edit,
+        "assignment_date_edit": assignment_date_edit or _initial_assignment_date_for_task(task),
+    }
     highlight_enabled = use_personal_highlight.lower() in {"true", "on", "1", "yes"}
     normalized_highlight_color = None
     if highlight_enabled:
@@ -1235,6 +1331,8 @@ def task_edit_submit(
                     task=task,
                     redirect_target=redirect_target,
                     form_error="Please choose a valid personal task highlight colour.",
+                    form_values=form_values,
+                    assignment_feedback=None,
                 ),
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -1253,6 +1351,8 @@ def task_edit_submit(
                 task=task,
                 redirect_target=redirect_target,
                 form_error="Please provide valid task values before saving.",
+                form_values=form_values,
+                assignment_feedback=None,
             ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -1275,6 +1375,8 @@ def task_edit_submit(
                 task=task,
                 redirect_target=redirect_target,
                 form_error="Please provide valid recurring task settings before saving.",
+                form_values=form_values,
+                assignment_feedback=None,
             ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -1295,6 +1397,8 @@ def task_edit_submit(
                     task=task,
                     redirect_target=redirect_target,
                     form_error="Choose a valid future repeat date.",
+                    form_values=form_values,
+                    assignment_feedback=None,
                 ),
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -1308,6 +1412,66 @@ def task_edit_submit(
                     task=task,
                     redirect_target=redirect_target,
                     form_error="Future repeats must start after this task's due date.",
+                    form_values=form_values,
+                    assignment_feedback=None,
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    selected_assignee_id = int(assignee_id_edit) if assignee_id_edit.strip().isdigit() else None
+    selected_assignment_date = None
+    if selected_assignee_id is not None:
+        try:
+            selected_assignment_date = date.fromisoformat(assignment_date_edit)
+        except ValueError:
+            return templates.TemplateResponse(
+                "tasks/edit.html",
+                _task_edit_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    task=task,
+                    redirect_target=redirect_target,
+                    form_error="Please choose a valid assignment date.",
+                    form_values=form_values,
+                    assignment_feedback=None,
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    updated_points = service.get_points_for_level(update_level)
+    assignment_changed = (
+        selected_assignee_id != task.assignee_id or selected_assignment_date != task.assignment_date
+    )
+    should_validate_assignment = (
+        selected_assignee_id is not None
+        and selected_assignment_date is not None
+        and (
+            assignment_changed
+            or (selected_assignment_date >= date.today() and update_level != task.effort_level)
+        )
+    )
+    assignment_feedback = None
+    if should_validate_assignment:
+        assignment_feedback = WorkloadService(db).validate_assignment(
+            user_id=selected_assignee_id,
+            date_value=selected_assignment_date,
+            task_points=updated_points,
+            exclude_task_id=task.id,
+            allow_policy_override=False,
+        )
+        if not assignment_feedback["valid"]:
+            return templates.TemplateResponse(
+                "tasks/edit.html",
+                _task_edit_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    task=task,
+                    redirect_target=redirect_target,
+                    form_error=assignment_feedback.get("message", "This assignment cannot be saved."),
+                    form_values=form_values,
+                    assignment_feedback=assignment_feedback,
                 ),
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -1324,6 +1488,13 @@ def task_edit_submit(
         **recurrence_values,
     )
     service.update_task(task, payload, recurrence_series_due_date=recurrence_series_due_date_value)
+    if assignment_changed:
+        service.update_task_schedule(
+            task,
+            due_date=update_due_date,
+            assignee_id=selected_assignee_id,
+            assignment_date=selected_assignment_date if selected_assignee_id is not None else None,
+        )
     UserTaskDisplayService(db).set_highlight_color(
         user=user,
         task=task,
@@ -1572,6 +1743,7 @@ def task_assignment_check(
     request: Request,
     assignee_id: int | None = None,
     assignment_date: str | None = None,
+    effort_level: str | None = None,
     allow_policy_override: str = "false",
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -1601,10 +1773,24 @@ def task_assignment_check(
             },
         )
 
+    task_points = task.points_value
+    if effort_level:
+        try:
+            task_points = TaskService(db).get_points_for_level(EffortLevel(effort_level))
+        except ValueError:
+            return templates.TemplateResponse(
+                "tasks/partials/assignment_feedback.html",
+                {
+                    "request": request,
+                    "task": task,
+                    "feedback": {"valid": False, "message": "Choose a valid effort level first."},
+                },
+            )
+
     feedback = WorkloadService(db).validate_assignment(
         user_id=assignee_id,
         date_value=parsed_date,
-        task_points=task.points_value,
+        task_points=task_points,
         exclude_task_id=task.id,
         allow_policy_override=_can_override_schedule_for_assignment(viewer=user, assignee_id=assignee_id)
         and allow_policy_override.lower() in {"true", "on", "1", "yes"},
@@ -1667,6 +1853,7 @@ def task_create_assignment_check(
 def task_assignment_next_available(
     task_id: int,
     assignee_id: int | None = None,
+    effort_level: str | None = None,
     allow_policy_override: str = "false",
     start_date: str | None = None,
     db: Session = Depends(get_db),
@@ -1680,6 +1867,13 @@ def task_assignment_next_available(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
     if not assignee_id:
         return JSONResponse({"ok": False, "message": "Select a user first."}, status_code=status.HTTP_400_BAD_REQUEST)
+
+    task_points = task.points_value
+    if effort_level:
+        try:
+            task_points = task_service.get_points_for_level(EffortLevel(effort_level))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid effort level.") from exc
 
     allow_override = _can_override_schedule_for_assignment(viewer=user, assignee_id=assignee_id) and allow_policy_override.lower() in {
         "true",
@@ -1695,7 +1889,7 @@ def task_assignment_next_available(
             parsed_start_date = None
     payload = _next_available_assignment_shortcut(
         db=db,
-        task_points=task.points_value,
+        task_points=task_points,
         assignee_id=assignee_id,
         allow_policy_override=allow_override,
         exclude_task_id=task.id,
@@ -2081,6 +2275,59 @@ def admin_user_visibility_update(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return RedirectResponse(url="/admin/settings", status_code=status.HTTP_302_FOUND)
+
+
+@router.post("/admin/settings/users/{user_id}/delete")
+def admin_user_delete(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+    service = AdminSettingsService(db)
+    try:
+        service.delete_user(user_id, acting_admin_id=user.id)
+        return RedirectResponse(url="/admin/settings", status_code=status.HTTP_302_FOUND)
+    except ValueError as exc:
+        context = _admin_settings_context(request=request, user=user, service=service, ai_test_result=None)
+        context["user_management_result"] = {"ok": False, "error": str(exc)}
+        return templates.TemplateResponse("admin/settings.html", context, status_code=status.HTTP_400_BAD_REQUEST)
+
+
+@router.post("/admin/settings/login-access")
+def admin_login_access_settings_save(
+    request: Request,
+    public_registration_enabled: str = Form("false"),
+    auto_approve_registrations: str = Form("false"),
+    login_theme_preference: str = Form("light"),
+    registration_default_capacity_points: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+    service = AdminSettingsService(db)
+    try:
+        if registration_default_capacity_points.strip():
+            try:
+                parsed_default_capacity = int(registration_default_capacity_points)
+            except ValueError as exc:
+                raise ValueError("Default capacity for new registrations must be a whole number.") from exc
+        else:
+            parsed_default_capacity = None
+        service.update_login_access_settings(
+            public_registration_enabled=public_registration_enabled.lower() in {"true", "on", "1", "yes"},
+            auto_approve_registrations=auto_approve_registrations.lower() in {"true", "on", "1", "yes"},
+            login_theme_preference=login_theme_preference,
+            registration_default_capacity_points=parsed_default_capacity,
+        )
+        return RedirectResponse(url="/admin/settings", status_code=status.HTTP_302_FOUND)
+    except ValueError as exc:
+        context = _admin_settings_context(request=request, user=user, service=service, ai_test_result=None)
+        context["login_access_result"] = {"ok": False, "error": str(exc)}
+        return templates.TemplateResponse("admin/settings.html", context, status_code=status.HTTP_400_BAD_REQUEST)
 
 
 @router.post("/admin/settings/effort")

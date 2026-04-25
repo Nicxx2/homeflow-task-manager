@@ -2,13 +2,25 @@
 {% block content %}
 <header class="mb-6">
   <h1 class="text-2xl font-semibold">Admin Settings</h1>
-  <p class="text-slate-500 dark:text-slate-400">Manage workload defaults, capacity limits, and AI behavior.</p>
+  <p class="text-slate-500 dark:text-slate-400">Manage users, workload defaults, login access, and AI behavior.</p>
 </header>
 
 <div class="grid md:grid-cols-2 gap-6">
   <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800 md:col-span-2">
     <h2 class="font-medium mb-1">Users</h2>
     <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Approve registrations, manage visibility in member lists, and create users with optional defaults.</p>
+
+    {% if user_management_result %}
+      {% if user_management_result.ok %}
+      <div class="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/40 dark:bg-emerald-950/30">
+        <p class="font-medium text-emerald-800 dark:text-emerald-200">{{ user_management_result.message }}</p>
+      </div>
+      {% else %}
+      <div class="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm dark:border-red-900/40 dark:bg-red-950/30">
+        <p class="font-medium text-red-800 dark:text-red-200">{{ user_management_result.error }}</p>
+      </div>
+      {% endif %}
+    {% endif %}
 
     <div class="mb-6">
       <h3 class="font-medium mb-2">Pending registrations</h3>
@@ -91,6 +103,7 @@
             <th class="text-left px-3 py-2">Approval</th>
             <th class="text-left px-3 py-2">Member list</th>
             <th class="text-left px-3 py-2">Session timeout</th>
+            <th class="text-left px-3 py-2">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -108,9 +121,18 @@
               </form>
             </td>
             <td class="px-3 py-2">{{ row_user.session_timeout_minutes or "default" }}</td>
+            <td class="px-3 py-2">
+              {% if row_user.id == user.id %}
+              <span class="text-xs text-slate-500 dark:text-slate-400">Current account</span>
+              {% else %}
+              <form method="post" action="/admin/settings/users/{{ row_user.id }}/delete" onsubmit="return confirm('Remove {{ row_user.full_name }}? Assigned tasks will become unassigned and created tasks will stay in the system.');">
+                <button class="rounded-md border border-red-300 px-3 py-2 text-xs text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-950/30" type="submit">Remove user</button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
           {% else %}
-          <tr><td class="px-3 py-3 text-slate-500" colspan="6">No users found.</td></tr>
+          <tr><td class="px-3 py-3 text-slate-500" colspan="7">No users found.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -144,6 +166,59 @@
       <p class="text-sm text-slate-500 dark:text-slate-400">No users found.</p>
       {% endfor %}
     <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save capacities</button>
+    </form>
+  </section>
+
+  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800 md:col-span-2">
+    <h2 class="font-medium mb-4">Login Page Access</h2>
+
+    {% if login_access_result %}
+      <div class="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm dark:border-red-900/40 dark:bg-red-950/30">
+        <p class="font-medium text-red-800 dark:text-red-200">{{ login_access_result.error }}</p>
+      </div>
+    {% endif %}
+
+    <form method="post" action="/admin/settings/login-access" class="space-y-4">
+      <label class="flex items-center justify-between gap-3 text-sm">
+        <span class="font-medium">Show registration on login page</span>
+        <span class="flex items-center gap-2">
+          <input type="hidden" name="public_registration_enabled" value="false" />
+          <input type="checkbox" name="public_registration_enabled" value="true" {% if app_settings.public_registration_enabled %}checked{% endif %} />
+        </span>
+      </label>
+
+      <label class="flex items-center justify-between gap-3 text-sm">
+        <span class="font-medium">Auto-approve registrations</span>
+        <span class="flex items-center gap-2">
+          <input type="hidden" name="auto_approve_registrations" value="false" />
+          <input type="checkbox" name="auto_approve_registrations" value="true" {% if app_settings.auto_approve_registrations %}checked{% endif %} />
+        </span>
+      </label>
+
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium">Default capacity for new registrations</span>
+        <input
+          type="number"
+          min="1"
+          name="registration_default_capacity_points"
+          value="{{ app_settings.registration_default_capacity_points or '' }}"
+          placeholder="Leave blank for none"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+        />
+      </label>
+
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium">Login page theme</span>
+        <select name="login_theme_preference" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+          <option value="light" {% if app_settings.login_theme_preference == "light" %}selected{% endif %}>Light</option>
+          <option value="dark" {% if app_settings.login_theme_preference == "dark" %}selected{% endif %}>Dark</option>
+          <option value="system" {% if app_settings.login_theme_preference == "system" %}selected{% endif %}>System</option>
+        </select>
+      </label>
+
+      <div>
+        <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save login page settings</button>
+      </div>
     </form>
   </section>
 </div>

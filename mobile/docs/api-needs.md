@@ -7,12 +7,17 @@ The current backend exposes JSON routes under `/api/v1` and a top-level health e
 Current relevant routes already in the repo:
 
 - `POST /api/v1/auth/login`
-- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/register` when public registration is enabled
 - `GET /api/v1/tasks`
 - `GET /api/v1/tasks/{task_id}`
 - `PUT /api/v1/tasks/{task_id}`
 - `POST /api/v1/tasks/{task_id}/assign`
 - `GET /health`
+
+Notes:
+
+- the mobile app currently uses sign-in with an existing account rather than an in-app registration flow
+- public registration can be disabled by an admin, so mobile clients should not assume self-signup is available on every server
 
 Current auth response:
 
@@ -60,6 +65,10 @@ Required:
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout` if server-side token invalidation is introduced
+
+Optional:
+
+- `POST /api/v1/auth/register` only if the product later exposes self-service signup in mobile
 
 Recommended login response fields:
 

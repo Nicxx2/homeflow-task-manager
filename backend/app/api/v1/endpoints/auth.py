@@ -12,6 +12,8 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     service = AuthService(db)
+    if not service.get_public_registration_enabled():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is currently closed.")
     try:
         user = service.register(payload)
     except ValueError as exc:

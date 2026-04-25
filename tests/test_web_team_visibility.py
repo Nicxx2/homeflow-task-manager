@@ -1,4 +1,6 @@
+import re
 from datetime import date, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -14,6 +16,7 @@ from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user_daily_capacity import UserDailyCapacity
 from backend.app.schemas.auth import RegisterRequest
 from backend.app.schemas.task import TaskCreate
+from backend.app.services.admin_settings_service import AdminSettingsService
 from backend.app.services.auth_service import AuthService
 from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
@@ -1496,6 +1499,214 @@ def test_task_edit_invalid_submission_returns_form_error():
         db.close()
 
 
+def test_task_create_page_allows_past_due_dates():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"create-past-due-{token}@example.com",
+            full_name="Create Past Due",
+            capacity=8,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get("/tasks/create")
+
+        assert response.status_code == 200
+        due_input = re.search(r'<input id="task_due_date"[^>]+>', response.text)
+        assert due_input is not None
+        assert 'min="' not in due_input.group(0)
+    finally:
+        db.close()
+
+
+def test_quick_schedule_uses_today_for_past_assignment_dates():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"quick-schedule-past-{token}@example.com",
+            full_name="Quick Schedule Past",
+            capacity=8,
+        )
+        past_day = date.today() - timedelta(days=2)
+        task = _create_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Past Assignment {token}",
+            due_date=past_day,
+            assignment_date=past_day,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get("/tasks?scope=mine&view=overdue")
+
+        assert response.status_code == 200
+        assignment_input = re.search(
+            rf'<input[^>]+id="quick-assignment-date-{task.id}"[^>]+value="([^"]+)"',
+            response.text,
+        )
+        assert assignment_input is not None
+        assert assignment_input.group(1) == date.today().isoformat()
+    finally:
+        db.close()
+
+
+def test_task_edit_page_prefills_assign_now_section():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-assign-prefill-{token}@example.com",
+            full_name="Edit Assign Prefill",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"edit-assign-prefill-mate-{token}@example.com",
+            full_name="Edit Assign Teammate",
+            capacity=10,
+        )
+        assignment_day = date.today() + timedelta(days=3)
+        task = _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Editable Assigned Task {token}",
+            day=assignment_day,
+            effort_level=EffortLevel.LOW,
+        )
+
+        client = _authed_client(viewer)
+        response = client.get(f"/tasks/{task.id}/edit")
+
+        assert response.status_code == 200
+        assert "Assign now" in response.text
+        assert "Keep assignment changes in the same save flow" not in response.text
+        assert f'name="assignment_date_edit" value="{assignment_day.isoformat()}"' in response.text
+        assert f'<option value="{teammate.id}" selected>' in response.text
+    finally:
+        db.close()
+
+
+def test_task_edit_revalidates_existing_assignment_when_effort_changes():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-effort-viewer-{token}@example.com",
+            full_name="Edit Effort Viewer",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"edit-effort-mate-{token}@example.com",
+            full_name="Edit Effort Mate",
+            capacity=8,
+        )
+        assignment_day = date.today() + timedelta(days=2)
+        task = _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Edit Revalidation Task {token}",
+            day=assignment_day,
+            effort_level=EffortLevel.LOW,
+        )
+        _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Existing Load {token}",
+            day=assignment_day,
+            effort_level=EffortLevel.LOW,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post(
+            f"/tasks/{task.id}/edit",
+            data={
+                "title": task.title,
+                "description": task.description,
+                "due_date": task.due_date.isoformat(),
+                "effort_level": EffortLevel.HIGH.value,
+                "status_value": task.status.value,
+                "assignee_id_edit": str(teammate.id),
+                "assignment_date_edit": assignment_day.isoformat(),
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Assignment exceeds daily capacity." in response.text
+
+        db.refresh(task)
+        assert task.effort_level == EffortLevel.LOW
+        assert task.assignee_id == teammate.id
+        assert task.assignment_date == assignment_day
+    finally:
+        db.close()
+
+
+def test_task_edit_can_clear_assignment_without_extra_steps():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"edit-unassign-viewer-{token}@example.com",
+            full_name="Edit Unassign Viewer",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"edit-unassign-mate-{token}@example.com",
+            full_name="Edit Unassign Mate",
+            capacity=10,
+        )
+        assignment_day = date.today() + timedelta(days=4)
+        task = _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Edit Unassign Task {token}",
+            day=assignment_day,
+            effort_level=EffortLevel.MEDIUM,
+        )
+
+        client = _authed_client(viewer)
+        response = client.post(
+            f"/tasks/{task.id}/edit",
+            data={
+                "title": task.title,
+                "description": task.description,
+                "due_date": task.due_date.isoformat(),
+                "effort_level": task.effort_level.value,
+                "status_value": task.status.value,
+                "assignee_id_edit": "",
+                "assignment_date_edit": "",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+
+        db.refresh(task)
+        assert task.assignee_id is None
+        assert task.assignment_date is None
+    finally:
+        db.close()
+
+
 def test_task_edit_page_shows_current_recurring_summary_and_next_due_date():
     db = SessionLocal()
     try:
@@ -1600,5 +1811,272 @@ def test_task_edit_page_shows_final_occurrence_message_when_one_is_left():
         assert response.status_code == 200
         assert 'value="1"' in response.text
         assert "This current task is the final occurrence in the series." in response.text
+    finally:
+        db.close()
+
+
+def test_admin_can_remove_user_and_cleanup_assigned_work():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        admin = _create_user(
+            db,
+            email=f"remove-admin-{token}@example.com",
+            full_name="Remove Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+        teammate = _create_user(
+            db,
+            email=f"remove-target-{token}@example.com",
+            full_name="Remove Target",
+            capacity=7,
+        )
+        assignment_day = date.today() + timedelta(days=2)
+        task = _create_task(
+            db,
+            creator=teammate,
+            assignee=teammate,
+            title=f"Removal Task {token}",
+            day=assignment_day,
+            effort_level=EffortLevel.MEDIUM,
+        )
+
+        client = _authed_client(admin)
+        response = client.post(
+            f"/admin/settings/users/{teammate.id}/delete",
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+
+        db.expire_all()
+        remaining_user = AuthService(db).get_by_email(teammate.email)
+        assert remaining_user is None
+
+        updated_task = db.get(Task, task.id)
+        assert updated_task is not None
+        assert updated_task.assignee_id is None
+        assert updated_task.assignment_date is None
+        assert updated_task.created_by_id == admin.id
+        assert db.get(UserDailyCapacity, teammate.id) is None
+    finally:
+        db.close()
+
+
+def test_admin_cannot_remove_own_account():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        only_admin = _create_user(
+            db,
+            email=f"last-admin-{token}@example.com",
+            full_name="Last Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+        member = _create_user(
+            db,
+            email=f"last-admin-member-{token}@example.com",
+            full_name="Last Admin Member",
+            capacity=10,
+        )
+
+        client = _authed_client(member)
+        forbidden_response = client.get("/admin/settings")
+        assert forbidden_response.status_code == 403
+
+        admin_client = _authed_client(only_admin)
+        response = admin_client.post(f"/admin/settings/users/{only_admin.id}/delete")
+
+        assert response.status_code == 400
+        assert "You cannot remove your own account." in response.text
+    finally:
+        db.close()
+
+
+def test_admin_registration_toggle_updates_login_message():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        admin = _create_user(
+            db,
+            email=f"toggle-admin-{token}@example.com",
+            full_name="Toggle Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+
+        client = _authed_client(admin)
+        response = client.post(
+            "/admin/settings/login-access",
+            data={
+                "public_registration_enabled": "true",
+                "auto_approve_registrations": "true",
+                "registration_default_capacity_points": "6",
+                "login_theme_preference": "light",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+    finally:
+        db.close()
+
+    public_client = TestClient(app)
+    login_page = public_client.get("/login")
+    assert login_page.status_code == 200
+    assert "auto-approved and can sign in straight away" in login_page.text
+
+    db = SessionLocal()
+    try:
+        assert AdminSettingsService(db).get_app_settings().registration_default_capacity_points == 6
+        AdminSettingsService(db).update_login_access_settings(
+            public_registration_enabled=True,
+            auto_approve_registrations=False,
+            login_theme_preference="light",
+            registration_default_capacity_points=None,
+        )
+    finally:
+        db.close()
+
+
+def test_login_page_hides_registration_when_disabled():
+    db = SessionLocal()
+    try:
+        AdminSettingsService(db).update_login_access_settings(
+            public_registration_enabled=False,
+            auto_approve_registrations=False,
+            login_theme_preference="light",
+            registration_default_capacity_points=None,
+        )
+    finally:
+        db.close()
+
+    public_client = TestClient(app)
+    response = public_client.get("/login")
+
+    assert response.status_code == 200
+    assert "Create an account" not in response.text
+    assert 'action="/register"' not in response.text
+    assert "Welcome back" in response.text
+
+    db = SessionLocal()
+    try:
+        AdminSettingsService(db).update_login_access_settings(
+            public_registration_enabled=True,
+            auto_approve_registrations=False,
+            login_theme_preference="light",
+            registration_default_capacity_points=None,
+        )
+    finally:
+        db.close()
+
+
+def test_login_page_uses_configured_theme_preference():
+    db = SessionLocal()
+    try:
+        AdminSettingsService(db).update_login_access_settings(
+            public_registration_enabled=True,
+            auto_approve_registrations=False,
+            login_theme_preference="dark",
+            registration_default_capacity_points=None,
+        )
+    finally:
+        db.close()
+
+    public_client = TestClient(app)
+    response = public_client.get("/login")
+
+    assert response.status_code == 200
+    assert 'const pref = "dark";' in response.text
+
+    db = SessionLocal()
+    try:
+        AdminSettingsService(db).update_login_access_settings(
+            public_registration_enabled=True,
+            auto_approve_registrations=False,
+            login_theme_preference="light",
+            registration_default_capacity_points=None,
+        )
+    finally:
+        db.close()
+
+
+def test_login_access_settings_reject_invalid_default_capacity():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        admin = _create_user(
+            db,
+            email=f"login-capacity-admin-{token}@example.com",
+            full_name="Login Capacity Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+
+        client = _authed_client(admin)
+        response = client.post(
+            "/admin/settings/login-access",
+            data={
+                "public_registration_enabled": "true",
+                "auto_approve_registrations": "true",
+                "registration_default_capacity_points": "abc",
+                "login_theme_preference": "light",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Default capacity for new registrations must be a whole number." in response.text
+    finally:
+        db.close()
+
+
+def test_admin_service_auto_refreshes_ai_models_only_when_registry_is_empty(monkeypatch):
+    db = SessionLocal()
+    try:
+        service = AdminSettingsService(db)
+        discovered_models = [SimpleNamespace(provider_name="ollama", model_identifier="llama3.2")]
+        refresh_calls: list[str] = []
+
+        monkeypatch.setattr(service.ai, "list_registry_models", lambda: [])
+
+        def _fake_refresh():
+            refresh_calls.append("called")
+            return discovered_models
+
+        monkeypatch.setattr(service.ai, "refresh_model_registry", _fake_refresh)
+
+        models = service.get_ai_registry_models(auto_refresh_if_empty=True)
+
+        assert models == discovered_models
+        assert refresh_calls == ["called"]
+    finally:
+        db.close()
+
+
+def test_admin_service_skips_ai_model_refresh_when_registry_already_has_models(monkeypatch):
+    db = SessionLocal()
+    try:
+        service = AdminSettingsService(db)
+        existing_models = [SimpleNamespace(provider_name="ollama", model_identifier="llama3.2")]
+
+        monkeypatch.setattr(service.ai, "list_registry_models", lambda: existing_models)
+
+        def _unexpected_refresh():
+            raise AssertionError("refresh_model_registry should not run when models already exist")
+
+        monkeypatch.setattr(service.ai, "refresh_model_registry", _unexpected_refresh)
+
+        models = service.get_ai_registry_models(auto_refresh_if_empty=True)
+
+        assert models == existing_models
     finally:
         db.close()

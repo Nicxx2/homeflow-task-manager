@@ -55,7 +55,7 @@
     </div>
     <div>
       <label class="block text-sm mb-1">Due date</label>
-      <input id="task_due_date" type="date" name="due_date" value="{{ form_values.due_date }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" min="{{ today }}" required data-schedule-due-date onchange="appResetScheduleShortcutFeedback(this)" />
+      <input id="task_due_date" type="date" name="due_date" value="{{ form_values.due_date }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required data-schedule-due-date onchange="appResetScheduleShortcutFeedback(this)" />
     </div>
     <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if form_values.assignee_id_create %}open{% endif %}>
       <summary class="cursor-pointer list-none">
@@ -64,7 +64,6 @@
             <p class="text-sm font-medium">Assign now</p>
             <p class="text-xs text-slate-500 dark:text-slate-400">Optional. Keep creation fast, or plan it immediately.</p>
           </div>
-          <span class="text-xs text-slate-500 dark:text-slate-400">{% if form_values.assignee_id_create %}Planned{% else %}Optional{% endif %}</span>
         </div>
       </summary>
       <div class="mt-3 space-y-3">

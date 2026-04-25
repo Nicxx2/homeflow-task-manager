@@ -3,8 +3,10 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.models.app_settings import AppSettings
 from backend.app.core.security import build_access_token, create_access_token, get_password_hash, verify_password
 from backend.app.models.user import User
+from backend.app.models.user_daily_capacity import UserDailyCapacity
 from backend.app.schemas.auth import RegisterRequest
 
 
@@ -24,18 +26,43 @@ class AuthService:
     def get_by_email(self, email: str) -> User | None:
         return self.db.scalar(select(User).where(User.email == email.lower().strip()))
 
+    def get_app_settings(self) -> AppSettings:
+        settings = self.db.get(AppSettings, 1)
+        if settings:
+            return settings
+
+        settings = AppSettings(id=1)
+        self.db.add(settings)
+        self.db.commit()
+        self.db.refresh(settings)
+        return settings
+
+    def get_auto_approve_registrations(self) -> bool:
+        return self.get_app_settings().auto_approve_registrations
+
+    def get_public_registration_enabled(self) -> bool:
+        return self.get_app_settings().public_registration_enabled
+
+    def get_login_theme_preference(self) -> str:
+        selected = (self.get_app_settings().login_theme_preference or "light").strip().lower()
+        return selected if selected in self.ALLOWED_THEME_PREFERENCES else "light"
+
     def register(
         self,
         payload: RegisterRequest,
         is_admin: bool = False,
-        require_approval: bool = True,
+        require_approval: bool | None = None,
         show_in_member_lists: bool | None = None,
     ) -> User:
         existing = self.get_by_email(payload.email)
         if existing:
             raise ValueError("Email already exists.")
 
+        if require_approval is None:
+            require_approval = not self.get_auto_approve_registrations()
+
         approved = is_admin or not require_approval
+        app_settings = self.get_app_settings()
         user = User(
             email=payload.email.lower().strip(),
             full_name=payload.full_name.strip(),
@@ -45,6 +72,12 @@ class AuthService:
             show_in_member_lists=(not is_admin) if show_in_member_lists is None else show_in_member_lists,
         )
         self.db.add(user)
+        self.db.flush()
+
+        default_capacity = app_settings.registration_default_capacity_points
+        if not is_admin and default_capacity is not None:
+            self.db.add(UserDailyCapacity(user_id=user.id, daily_capacity_points=default_capacity))
+
         self.db.commit()
         self.db.refresh(user)
         return user

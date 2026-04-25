@@ -45,6 +45,7 @@ def seed_initial_configs() -> None:
     db: Session = SessionLocal()
     try:
         service = AdminSettingsService(db)
+        service.get_app_settings()
         existing = service.get_effort_configs()
         if existing:
             return

@@ -5,31 +5,122 @@
   <p class="text-slate-500 dark:text-slate-400">{{ task.title }}</p>
 </header>
 
-<form method="post" action="/tasks/{{ task.id }}/edit" class="app-surface density-panel density-stack max-w-2xl space-y-4 rounded-xl border p-5">
+<form
+  method="post"
+  action="/tasks/{{ task.id }}/edit"
+  class="app-surface density-panel density-stack max-w-2xl space-y-4 rounded-xl border p-5"
+  data-schedule-form
+  data-schedule-preview-url="/tasks/{{ task.id }}/assignment-check"
+  data-next-available-url="/tasks/{{ task.id }}/assignment-next-available"
+  data-schedule-effort-input-id="edit_effort_level"
+  onsubmit="return appValidateScheduleForm(this)"
+>
   <input type="hidden" name="redirect_to" value="{{ redirect_to }}" />
   {% if form_error %}
     <div class="rounded-md bg-red-50 border border-red-100 text-red-700 px-3 py-2 text-sm">{{ form_error }}</div>
   {% endif %}
   <div>
     <label class="block text-sm mb-1">Title</label>
-    <input name="title" value="{{ task.title }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
+    <input name="title" value="{{ form_values.title }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
   </div>
   <div>
     <label class="block text-sm mb-1">Description</label>
-    <textarea name="description" rows="4" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required>{{ task.description }}</textarea>
+    <textarea name="description" rows="4" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required>{{ form_values.description }}</textarea>
   </div>
   <div>
     <label class="block text-sm mb-1">{% if is_recurring_root %}Due date for this task{% else %}Due date{% endif %}</label>
-    <input type="date" name="due_date" value="{{ task.due_date }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
+    <input
+      type="date"
+      name="due_date"
+      value="{{ form_values.due_date }}"
+      class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+      required
+      data-schedule-due-date
+      onchange="appResetScheduleShortcutFeedback(this)"
+    />
     {% if is_recurring_root %}
     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">This changes only the active occurrence. Use the recurring section below to change future repeats.</p>
     {% endif %}
   </div>
+  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if form_values.assignee_id_edit or assignment_feedback %}open{% endif %}>
+    <summary class="cursor-pointer list-none">
+      <p class="text-sm font-medium">Assign now</p>
+    </summary>
+    <div class="mt-3 space-y-3">
+      <label class="block text-sm">
+        <span class="mb-1 block">Assignee</span>
+        <select
+          id="edit_assignee_id"
+          name="assignee_id_edit"
+          class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          data-schedule-assignee
+          onchange="appToggleAssignmentSection(this); appRequestSchedulePreview(appFindScheduleForm(this))"
+        >
+          <option value="">Leave unassigned</option>
+          {% for item in assignable_users %}
+          <option value="{{ item.id }}" {% if form_values.assignee_id_edit == (item.id ~ '') %}selected{% endif %}>
+            {{ item.full_name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div data-assignment-section {% if not form_values.assignee_id_edit %}class="hidden"{% endif %}>
+        <label class="block text-sm">
+          <span class="mb-1 block">Assignment day</span>
+          <input
+            id="edit_assignment_date"
+            type="date"
+            name="assignment_date_edit"
+            value="{{ form_values.assignment_date_edit }}"
+            min="{{ assignment_date_min }}"
+            class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+            data-schedule-assignment-date
+            data-user-picked-date="{% if form_values.assignee_id_edit and form_values.assignment_date_edit %}true{% else %}false{% endif %}"
+            onfocus="appBeginScheduleDateEdit(this)"
+            onclick="appBeginScheduleDateEdit(this)"
+            oninput="this.dataset.userPickedDate='true'; appHandleScheduleDateInteraction(this)"
+            onchange="this.dataset.userPickedDate='true'; appHandleScheduleDateInteraction(this)"
+            oninvalid="appHandleScheduleInvalid(this)"
+          />
+        </label>
+
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            onclick="appApplyScheduleDueDate(this)"
+          >
+            Use due date
+          </button>
+          <button
+            type="button"
+            class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            onclick="appApplyNextAvailableDate(this)"
+          >
+            Next free
+          </button>
+        </div>
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" data-schedule-shortcut-feedback data-default-feedback="If this day does not fit, use Next free to jump to the next available day.">
+          If this day does not fit, use Next free to jump to the next available day.
+        </p>
+        <div class="mt-3" data-schedule-feedback>
+          {% set feedback = assignment_feedback %}
+          {% include "tasks/partials/assignment_feedback.html" %}
+        </div>
+      </div>
+    </div>
+  </details>
   <div>
     <label class="block text-sm mb-1">Effort level</label>
-    <select name="effort_level" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+    <select
+      id="edit_effort_level"
+      name="effort_level"
+      class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+      onchange="appRequestSchedulePreview(appFindScheduleForm(this))"
+    >
       {% for level in levels %}
-      <option value="{{ level.value }}" {% if task.effort_level == level %}selected{% endif %}>{{ level.value|upper }}</option>
+      <option value="{{ level.value }}" {% if form_values.effort_level == level.value %}selected{% endif %}>{{ level.value|upper }}</option>
       {% endfor %}
     </select>
   </div>
@@ -37,7 +128,7 @@
     <label class="block text-sm mb-1">Status</label>
     <select name="status_value" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
       {% for item in statuses %}
-      <option value="{{ item.value }}" {% if task.status == item %}selected{% endif %}>{{ item.value }}</option>
+      <option value="{{ item.value }}" {% if form_values.status_value == item.value %}selected{% endif %}>{{ item.value }}</option>
       {% endfor %}
     </select>
   </div>
@@ -53,7 +144,7 @@
     </summary>
     <div class="mt-3">
       <label class="flex items-center gap-2 text-sm font-medium">
-        <input type="checkbox" name="use_personal_highlight" value="true" {% if personal_highlight_color %}checked{% endif %} />
+        <input type="checkbox" name="use_personal_highlight" value="true" {% if form_values.use_personal_highlight %}checked{% endif %} />
         Highlight this task in my own view
       </label>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -61,11 +152,11 @@
       </p>
       <label class="mt-3 block text-sm">
         <span class="mb-1 block">My task highlight colour</span>
-        <input type="color" name="personal_highlight_color" value="{{ personal_highlight_default }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
+        <input type="color" name="personal_highlight_color" value="{{ form_values.personal_highlight_color or personal_highlight_default }}" class="app-color-input h-11 w-full rounded-md border border-slate-300 bg-white px-1 py-1 dark:border-slate-700 dark:bg-slate-800" />
       </label>
     </div>
   </details>
-  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+  <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700" {% if form_values.repeat_weekly %}open{% endif %}>
     <summary class="cursor-pointer list-none">
       <div class="flex items-center justify-between gap-3">
         <div>
@@ -99,7 +190,7 @@
       </div>
       {% endif %}
       <label class="flex items-center gap-2 text-sm font-medium">
-        <input type="checkbox" name="repeat_weekly" value="true" {% if task.recurrence_pattern == "weekly" %}checked{% endif %} />
+        <input type="checkbox" name="repeat_weekly" value="true" {% if form_values.repeat_weekly %}checked{% endif %} />
         Repeat weekly from this due date
       </label>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -109,20 +200,20 @@
         {% if recurrence_preview %}
         <label class="text-sm">
           <span class="mb-1 block">Future repeat due date</span>
-          <input type="date" name="recurrence_series_due_date" value="{{ recurrence_series_due_date_input_value }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+          <input type="date" name="recurrence_series_due_date" value="{{ form_values.recurrence_series_due_date or recurrence_series_due_date_input_value }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
         </label>
         {% endif %}
         <label class="text-sm">
           <span class="mb-1 block">Every X weeks</span>
-          <input type="number" min="1" name="recurrence_interval_weeks" value="{{ task.recurrence_interval_weeks or 1 }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+          <input type="number" min="1" name="recurrence_interval_weeks" value="{{ form_values.recurrence_interval_weeks }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
         </label>
         <label class="text-sm">
           <span class="mb-1 block">End date (optional)</span>
-          <input type="date" name="recurrence_until" value="{{ task.recurrence_until or '' }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+          <input type="date" name="recurrence_until" value="{{ form_values.recurrence_until }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
         </label>
         <label class="text-sm">
           <span class="mb-1 block">{% if recurrence_preview %}Occurrences left (optional){% else %}Total occurrences (optional){% endif %}</span>
-          <input type="number" min="1" name="recurrence_count_limit" value="{{ recurrence_count_limit_input_value }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
+          <input type="number" min="1" name="recurrence_count_limit" value="{{ form_values.recurrence_count_limit or recurrence_count_limit_input_value }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
         </label>
       </div>
       {% if recurrence_preview %}
@@ -143,8 +234,8 @@
       <label class="mt-3 block text-sm">
         <span class="mb-1 block">If the scheduled day is blocked</span>
         <select name="recurrence_blocked_behavior" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-          <option value="skip" {% if (task.recurrence_blocked_behavior or "skip") == "skip" %}selected{% endif %}>Skip that occurrence and resume next week</option>
-          <option value="move_same_week" {% if task.recurrence_blocked_behavior == "move_same_week" %}selected{% endif %}>Move to the next allowed day in the same week</option>
+          <option value="skip" {% if form_values.recurrence_blocked_behavior == "skip" %}selected{% endif %}>Skip that occurrence and resume next week</option>
+          <option value="move_same_week" {% if form_values.recurrence_blocked_behavior == "move_same_week" %}selected{% endif %}>Move to the next allowed day in the same week</option>
         </select>
       </label>
     </div>

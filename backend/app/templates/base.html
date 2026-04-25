@@ -206,7 +206,7 @@
     }
 
     (function initThemePreference() {
-      const pref = "{{ (user.theme_preference if user is defined and user else 'light') or 'light' }}";
+      const pref = "{{ (user.theme_preference if user is defined and user else (login_theme_preference if login_theme_preference is defined else 'light')) or 'light' }}";
       applyThemePreference(pref);
       window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function() {
         const current = document.documentElement.dataset.themePreference || "light";
@@ -251,7 +251,7 @@
                 <option value="system" {% if user.theme_preference == "system" %}selected{% endif %}>System</option>
               </select>
             </form>
-            <span class="rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">v2.3.6</span>
+            <span class="rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">v2.4</span>
             <form method="post" action="/logout">
               <button class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" type="submit">Logout</button>
             </form>
@@ -282,6 +282,17 @@
       next.setHours(0, 0, 0, 0);
       next.setDate(next.getDate() + 1);
       return appFormatIsoDate(next);
+    }
+
+    function appTodayIsoDate() {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return appFormatIsoDate(today);
+    }
+
+    function appEarliestScheduleAssignmentDate(input) {
+      const candidates = [input?.min || "", appTodayIsoDate()].filter(Boolean).sort();
+      return candidates.length ? candidates[candidates.length - 1] : "";
     }
 
     function appShiftIsoDate(value, days) {
@@ -394,9 +405,10 @@
         assignee_id: assigneeInput.value || "",
         assignment_date: assignmentInput.value || "",
       };
-      const effortInput = document.getElementById("selected_effort_level");
-      if (form.dataset.scheduleCreateFlow === "true") {
-        values.effort_level = effortInput ? effortInput.value || "" : "";
+      const effortInputId = form.dataset.scheduleEffortInputId || "";
+      const effortInput = effortInputId ? document.getElementById(effortInputId) : document.getElementById("selected_effort_level");
+      if (effortInput) {
+        values.effort_level = effortInput.value || "";
       }
       const overrideInput = form.querySelector("[name='allow_policy_override']");
       if (overrideInput) {
@@ -491,10 +503,14 @@
         return;
       }
 
-      if (input.min && input.value < input.min) {
-        input.setCustomValidity("Assignment date cannot be in the past.");
-        appSetScheduleShortcutFeedback(form, "Assignment date cannot be in the past.", true);
-        appSetImmediateScheduleFeedback(form, "Choose today or a future day for this assignment.", "error");
+      const earliestValidDate = appEarliestScheduleAssignmentDate(input);
+      if (earliestValidDate && input.value < earliestValidDate) {
+        input.value = earliestValidDate;
+        input.dataset.userPickedDate = "true";
+        input.setCustomValidity("");
+        appSetScheduleShortcutFeedback(form, `Past assignment dates are not allowed. Moved to ${earliestValidDate}.`, false);
+        appSetImmediateScheduleFeedback(form, "Checking availability for this day...", "neutral");
+        appRequestSchedulePreview(form);
         return;
       }
 
@@ -509,7 +525,8 @@
       if (!form || !assigneeInput || !assigneeInput.value || !assignmentInput) {
         return true;
       }
-      if (assignmentInput.min && assignmentInput.value && assignmentInput.value < assignmentInput.min) {
+      const earliestValidDate = appEarliestScheduleAssignmentDate(assignmentInput);
+      if (earliestValidDate && assignmentInput.value && assignmentInput.value < earliestValidDate) {
         assignmentInput.setCustomValidity("Assignment date cannot be in the past.");
         appSetScheduleShortcutFeedback(form, "Assignment date cannot be in the past.", true);
         appSetImmediateScheduleFeedback(form, "Choose today or a future day for this assignment.", "error");
@@ -580,7 +597,7 @@
       if (!assignmentInput || !value) {
         return;
       }
-      const minValue = assignmentInput.min || value;
+      const minValue = appEarliestScheduleAssignmentDate(assignmentInput) || value;
       let nextValue = value;
       let message = "Assignment day updated.";
       if (value < minValue) {
@@ -606,7 +623,7 @@
         appSetScheduleShortcutFeedback(form, "Add a due date first.", true);
         return;
       }
-      const minValue = assignmentInput.min || dueInput.value;
+      const minValue = appEarliestScheduleAssignmentDate(assignmentInput) || dueInput.value;
       let nextValue = dueInput.value;
       let message = "Assignment day updated from the due date.";
       if (dueInput.value < minValue) {
@@ -648,9 +665,10 @@
       }
 
       const params = new URLSearchParams({ assignee_id: assigneeInput.value });
-      const effortInput = document.getElementById("selected_effort_level");
-      if (form.dataset.scheduleCreateFlow === "true") {
-        if (!effortInput || !effortInput.value) {
+      const effortInputId = form.dataset.scheduleEffortInputId || "";
+      const effortInput = effortInputId ? document.getElementById(effortInputId) : document.getElementById("selected_effort_level");
+      if (effortInput) {
+        if (!effortInput.value) {
           appSetScheduleShortcutFeedback(form, "Select an effort level first.", true);
           return;
         }
