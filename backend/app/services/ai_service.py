@@ -14,7 +14,7 @@ class AIService:
     def __init__(self, db: Session):
         self.orchestrator = AIOrchestratorService(db)
 
-    def classify_task(self, title: str, description: str) -> dict:
+    def classify_task(self, title: str, description: str = "") -> dict:
         try:
             result = self.orchestrator.classify_task(title=title, description=description)
             return result.model_dump()
@@ -31,7 +31,7 @@ class AIService:
                 "fallback_used": True,
             }
 
-    def fallback_classification(self, title: str, description: str) -> dict:
+    def fallback_classification(self, title: str, description: str = "") -> dict:
         try:
             output = RulesFallbackProvider().classify_task(
                 title=title,

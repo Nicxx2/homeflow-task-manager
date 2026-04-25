@@ -21,6 +21,33 @@ import 'package:http/http.dart' as http;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('connection settings sanitize accidental scheme prefixes in host input', () {
+    const rawSettings = ConnectionSettings(
+      scheme: 'http',
+      host: 'https://demo.example.com:9443/path',
+      port: 8000,
+    );
+    expect(rawSettings.baseUrl, 'http://demo.example.com:9443');
+    expect(rawSettings.isValid, isTrue);
+
+    final settings = ConnectionSettings.sanitized(
+      scheme: 'http',
+      host: 'https://demo.example.com:9443/path',
+      port: 8000,
+    );
+
+    expect(settings.host, 'demo.example.com');
+    expect(settings.port, 9443);
+    expect(settings.baseUrl, 'http://demo.example.com:9443');
+
+    const fallbackPortSettings = ConnectionSettings(
+      scheme: 'https',
+      host: 'demo.example.com:abc',
+      port: 8443,
+    );
+    expect(fallbackPortSettings.baseUrl, 'https://demo.example.com:8443');
+  });
+
   test(
     'initialize keeps cached auth-required state out of manual sign-in status when session is still active',
     () async {

@@ -24,8 +24,8 @@
     <input name="title" value="{{ form_values.title }}" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required />
   </div>
   <div>
-    <label class="block text-sm mb-1">Description</label>
-    <textarea name="description" rows="4" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required>{{ form_values.description }}</textarea>
+    <label class="block text-sm mb-1">Description (optional)</label>
+    <textarea name="description" rows="4" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">{{ form_values.description }}</textarea>
   </div>
   <div>
     <label class="block text-sm mb-1">{% if is_recurring_root %}Due date for this task{% else %}Due date{% endif %}</label>

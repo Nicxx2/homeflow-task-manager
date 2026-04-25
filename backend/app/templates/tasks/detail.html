@@ -19,7 +19,7 @@
   <div class="space-y-2">
     <p class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Description</p>
     <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-4 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200">
-      {{ task.description }}
+      {{ task.description or "No description." }}
     </div>
   </div>
 

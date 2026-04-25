@@ -958,7 +958,7 @@ def task_ai_classify(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    if not title.strip() or not description.strip():
+    if not title.strip():
         return templates.TemplateResponse("tasks/partials/ai_waiting.html", {"request": request})
 
     ai_service = AIService(db)
@@ -977,7 +977,7 @@ def task_ai_classify(
 def task_create_submit(
     request: Request,
     title: str = Form(...),
-    description: str = Form(...),
+    description: str = Form(""),
     due_date: str = Form(...),
     effort_level: str = Form(...),
     ai_suggested_level: str = Form(""),
@@ -1274,7 +1274,7 @@ def task_edit_submit(
     task_id: int,
     request: Request,
     title: str = Form(...),
-    description: str = Form(...),
+    description: str = Form(""),
     due_date: str = Form(...),
     effort_level: str = Form(...),
     status_value: str = Form("pending"),

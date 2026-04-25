@@ -7,7 +7,7 @@ from backend.app.models.enums import EffortLevel, TaskStatus
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    description: str = Field(min_length=1)
+    description: str = ""
     due_date: date
     effort_level: EffortLevel
     ai_suggested_level: EffortLevel | None = None
@@ -29,10 +29,23 @@ class TaskCreate(BaseModel):
             raise ValueError("Recurring task values must be positive.")
         return value
 
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        selected = value.strip()
+        if not selected:
+            raise ValueError("Title is required.")
+        return selected
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str:
+        return (value or "").strip()
+
 
 class TaskUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    description: str = Field(min_length=1)
+    description: str = ""
     due_date: date
     effort_level: EffortLevel
     status: TaskStatus = TaskStatus.PENDING
@@ -48,6 +61,19 @@ class TaskUpdate(BaseModel):
         if value is not None and value <= 0:
             raise ValueError("Recurring task values must be positive.")
         return value
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        selected = value.strip()
+        if not selected:
+            raise ValueError("Title is required.")
+        return selected
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str:
+        return (value or "").strip()
 
 
 class TaskAssignRequest(BaseModel):

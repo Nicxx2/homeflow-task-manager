@@ -492,9 +492,9 @@ class AppController extends ChangeNotifier {
     _clearError();
     notifyListeners();
 
-    final settings = ConnectionSettings(
+    final settings = ConnectionSettings.sanitized(
       scheme: scheme,
-      host: host.trim(),
+      host: host,
       port: port,
     );
     if (!settings.isValid) {

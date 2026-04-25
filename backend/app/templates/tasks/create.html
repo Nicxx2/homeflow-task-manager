@@ -39,13 +39,12 @@
       />
     </div>
     <div>
-      <label class="block text-sm mb-1">Description</label>
+      <label class="block text-sm mb-1">Description (optional)</label>
       <textarea
         id="description"
         name="description"
         rows="4"
         class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
-        required
         hx-post="/tasks/ai-classify"
         hx-trigger="keyup changed delay:500ms"
         hx-include="#title,#description"

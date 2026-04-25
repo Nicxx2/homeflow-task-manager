@@ -1522,6 +1522,49 @@ def test_task_create_page_allows_past_due_dates():
         db.close()
 
 
+def test_task_create_allows_empty_description():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"create-empty-desc-{token}@example.com",
+            full_name="Create Empty Description",
+            capacity=8,
+        )
+
+        client = _authed_client(viewer)
+        due_day = (date.today() + timedelta(days=2)).isoformat()
+        response = client.post(
+            "/tasks",
+            data={
+                "title": f"Empty Description {token}",
+                "description": "",
+                "due_date": due_day,
+                "effort_level": EffortLevel.LOW.value,
+                "ai_suggested_level": EffortLevel.LOW.value,
+                "ai_confidence": "0.6",
+                "ai_reason": "title only",
+                "fallback_used": "true",
+                "provider_used": "rules",
+                "model_used": "rules-default",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        task = db.query(Task).filter(Task.title == f"Empty Description {token}").first()
+        assert task is not None
+        assert task.description == ""
+
+        detail_response = client.get(f"/tasks/{task.id}")
+        assert detail_response.status_code == 200
+        assert "No description." in detail_response.text
+    finally:
+        db.close()
+
+
 def test_quick_schedule_uses_today_for_past_assignment_dates():
     db = SessionLocal()
     try:

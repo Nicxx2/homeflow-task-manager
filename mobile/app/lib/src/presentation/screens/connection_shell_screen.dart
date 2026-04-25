@@ -48,6 +48,13 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
   Widget build(BuildContext context) {
     final controller = context.watch<AppController>();
     final theme = Theme.of(context);
+    final derivedSettings = ConnectionSettings.sanitized(
+      scheme: _scheme,
+      host: _hostController.text.trim().isEmpty
+          ? 'server-host'
+          : _hostController.text,
+      port: int.tryParse(_portController.text) ?? 8000,
+    );
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -102,6 +109,8 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
                         labelText: 'Hostname or IP',
                       ),
                       onChanged: (_) => setState(() {}),
+                      onEditingComplete: _normalizeConnectionDraftFields,
+                      onFieldSubmitted: (_) => _normalizeConnectionDraftFields(),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
                           return 'Host is required.';
@@ -149,7 +158,7 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Derived URL: ${ConnectionSettings(scheme: _scheme, host: _hostController.text.trim().isEmpty ? 'server-host' : _hostController.text.trim(), port: int.tryParse(_portController.text) ?? 8000).baseUrl}',
+                      'Derived URL: ${derivedSettings.baseUrl}',
                       style: theme.textTheme.bodySmall,
                     ),
                     if (controller.errorMessage != null) ...[
@@ -205,11 +214,12 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
     if (!_formKey.currentState!.validate()) {
       return;
     }
+    _normalizeConnectionDraftFields();
     final controller = context.read<AppController>();
     final okay = await controller.testConnection(
-      ConnectionSettings(
+      ConnectionSettings.sanitized(
         scheme: _scheme,
-        host: _hostController.text.trim(),
+        host: _hostController.text,
         port: int.parse(_portController.text),
       ),
     );
@@ -226,6 +236,7 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
     if (!_formKey.currentState!.validate()) {
       return;
     }
+    _normalizeConnectionDraftFields();
     await context.read<AppController>().signIn(
           scheme: _scheme,
           host: _hostController.text,
@@ -233,5 +244,24 @@ class _ConnectionShellScreenState extends State<ConnectionShellScreen> {
           email: _emailController.text,
           password: _passwordController.text,
         );
+  }
+
+  void _normalizeConnectionDraftFields() {
+    final normalized = ConnectionSettings.sanitized(
+      scheme: _scheme,
+      host: _hostController.text,
+      port: int.tryParse(_portController.text) ?? 8000,
+    );
+    _hostController.value = TextEditingValue(
+      text: normalized.host,
+      selection: TextSelection.collapsed(offset: normalized.host.length),
+    );
+    _portController.value = TextEditingValue(
+      text: normalized.port.toString(),
+      selection: TextSelection.collapsed(
+        offset: normalized.port.toString().length,
+      ),
+    );
+    setState(() {});
   }
 }

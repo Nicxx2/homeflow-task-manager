@@ -160,6 +160,39 @@ def test_task_create_still_requires_effort_level():
         db.close()
 
 
+def test_task_create_allows_empty_description_and_ai_can_use_title_only():
+    db = SessionLocal()
+    try:
+        if not db.get(TaskEffortConfig, EffortLevel.MEDIUM):
+            db.add(TaskEffortConfig(level=EffortLevel.MEDIUM, points_value=5))
+            db.commit()
+        user = db.query(User).filter(User.email == "phase4-empty-desc@example.com").first()
+        if not user:
+            user = User(email="phase4-empty-desc@example.com", full_name="Phase4 Empty Desc", hashed_password="x")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        payload = TaskCreate(
+            title="Quick task",
+            description="",
+            due_date=date.today() + timedelta(days=1),
+            effort_level=EffortLevel.MEDIUM,
+            provider_used="rules",
+            model_used="rules-default",
+        )
+        task = TaskService(db).create_unassigned_task(payload, user)
+        assert task.description == ""
+
+        result = AIOrchestratorService(
+            db,
+            provider_registry=ProviderRegistry([_FakePrimaryProvider(), _FakeFallbackProvider()]),
+        ).classify_task(title="Quick task", description="")
+        assert result.suggested_level in {EffortLevel.HIGH, EffortLevel.MEDIUM}
+    finally:
+        db.close()
+
+
 def test_admin_settings_update_logic():
     db = SessionLocal()
     try:
