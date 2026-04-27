@@ -270,7 +270,7 @@ class AdminSettingsService:
         timeout_seconds: int,
     ) -> AISettings:
         models = self.get_ai_registry_models()
-        if active_provider == "ollama":
+        if ai_enabled and active_provider == "ollama":
             if models:
                 ok = any(
                     item.provider_name == "ollama" and item.model_identifier == active_model and item.available
@@ -282,7 +282,7 @@ class AdminSettingsService:
             ai_enabled=ai_enabled,
             active_provider=active_provider,
             active_model=active_model,
-            fallback_provider=fallback_provider,
+            fallback_provider=fallback_provider if ai_enabled else "rules",
             timeout_seconds=timeout_seconds,
         )
 
@@ -291,7 +291,7 @@ class AdminSettingsService:
 
     def get_ai_registry_models(self, *, auto_refresh_if_empty: bool = False) -> list[AIModelRegistry]:
         models = self.ai.list_registry_models()
-        if models or not auto_refresh_if_empty:
+        if models or not auto_refresh_if_empty or not self.get_ai_settings().ai_enabled:
             return models
         return self.ai.refresh_model_registry()
 

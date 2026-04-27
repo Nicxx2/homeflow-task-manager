@@ -196,7 +196,7 @@ If someone is away or has blocked days
 
 ---
 
-## ✨ What is new in v2.4.1
+## ✨ What is new in v2.4.2
 
 - Edit task now uses the same familiar assign-now flow as task creation, with current assignee and assignment date prefilled when a task is already planned.
 - Assignment changes made during editing now re-check availability correctly when the assignee, assignment day, or effort level changes, with the same next-free suggestion flow used elsewhere in the app.

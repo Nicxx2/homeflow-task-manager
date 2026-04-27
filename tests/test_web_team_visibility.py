@@ -1633,8 +1633,15 @@ def test_task_edit_page_prefills_assign_now_section():
         assert response.status_code == 200
         assert "Assign now" in response.text
         assert "Keep assignment changes in the same save flow" not in response.text
-        assert f'name="assignment_date_edit" value="{assignment_day.isoformat()}"' in response.text
-        assert f'<option value="{teammate.id}" selected>' in response.text
+        assign_heading_index = response.text.index("Assign now")
+        assign_details_start = response.text.rfind("<details", 0, assign_heading_index)
+        assign_details_tag = response.text[assign_details_start: response.text.index(">", assign_details_start) + 1]
+        assert "open" in assign_details_tag
+        assert re.search(
+            rf'name="assignment_date_edit"\s+value="{assignment_day.isoformat()}"',
+            response.text,
+        )
+        assert re.search(rf'<option value="{teammate.id}"[^>]*selected>', response.text)
     finally:
         db.close()
 
@@ -1777,8 +1784,12 @@ def test_task_edit_page_shows_current_recurring_summary_and_next_due_date():
         response = client.get(f"/tasks/{task.id}/edit")
 
         next_due = due_day + timedelta(weeks=2)
+        recurring_heading_index = response.text.index("Recurring task options")
+        recurring_details_start = response.text.rfind("<details", 0, recurring_heading_index)
+        recurring_details_tag = response.text[recurring_details_start: response.text.index(">", recurring_details_start) + 1]
 
         assert response.status_code == 200
+        assert "open" not in recurring_details_tag
         assert "Due date for this task" in response.text
         assert "Use the recurring section below to change future repeats." in response.text
         assert "Future repeat due date" in response.text
@@ -2121,5 +2132,55 @@ def test_admin_service_skips_ai_model_refresh_when_registry_already_has_models(m
         models = service.get_ai_registry_models(auto_refresh_if_empty=True)
 
         assert models == existing_models
+    finally:
+        db.close()
+
+
+def test_admin_can_disable_ai_even_when_selected_ollama_model_is_unavailable(monkeypatch):
+    db = SessionLocal()
+    try:
+        service = AdminSettingsService(db)
+        unavailable_model = SimpleNamespace(
+            provider_name="ollama",
+            model_identifier="qwen2.5:1.5b",
+            available=False,
+        )
+        captured = {}
+
+        monkeypatch.setattr(service.ai, "list_registry_models", lambda: [unavailable_model])
+
+        def _fake_update_settings(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(**kwargs)
+
+        monkeypatch.setattr(service.ai, "update_settings", _fake_update_settings)
+
+        service.update_ai_settings(
+            ai_enabled=False,
+            active_provider="ollama",
+            active_model="qwen2.5:1.5b",
+            fallback_provider="ollama",
+            timeout_seconds=8,
+        )
+
+        assert captured["ai_enabled"] is False
+        assert captured["fallback_provider"] == "rules"
+    finally:
+        db.close()
+
+
+def test_admin_ai_registry_does_not_auto_refresh_when_ai_is_disabled(monkeypatch):
+    db = SessionLocal()
+    try:
+        service = AdminSettingsService(db)
+        monkeypatch.setattr(service, "get_ai_settings", lambda: SimpleNamespace(ai_enabled=False))
+        monkeypatch.setattr(service.ai, "list_registry_models", lambda: [])
+
+        def _unexpected_refresh():
+            raise AssertionError("refresh_model_registry should not run when AI is disabled")
+
+        monkeypatch.setattr(service.ai, "refresh_model_registry", _unexpected_refresh)
+
+        assert service.get_ai_registry_models(auto_refresh_if_empty=True) == []
     finally:
         db.close()

@@ -55,7 +55,7 @@ class AIOrchestratorService:
 
         if not current.ai_enabled:
             return self._classify_with_provider(
-                provider_name=current.fallback_provider,
+                provider_name="rules",
                 model="rules-default",
                 title=title,
                 description=description,
@@ -214,6 +214,14 @@ class AIOrchestratorService:
 
     def provider_health(self) -> list[dict]:
         current = self.get_ai_settings()
+        if not current.ai_enabled:
+            return [
+                {
+                    "provider_name": "rules",
+                    "ok": True,
+                    "message": "AI is disabled. Rules fallback is active.",
+                }
+            ]
         rows: list[dict] = []
         effective_timeout = max(current.timeout_seconds, 20)
         for name in self.registry.names():

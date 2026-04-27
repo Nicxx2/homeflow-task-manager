@@ -66,12 +66,12 @@ def setup_module():
     Base.metadata.create_all(bind=engine)
 
 
-def _seed_settings(db, active_provider="primary", active_model="primary-model", fallback_provider="rules"):
+def _seed_settings(db, active_provider="primary", active_model="primary-model", fallback_provider="rules", ai_enabled=True):
     row = db.get(AISettings, 1)
     if not row:
         row = AISettings(
             id=1,
-            ai_enabled=True,
+            ai_enabled=ai_enabled,
             active_provider=active_provider,
             active_model=active_model,
             fallback_provider=fallback_provider,
@@ -79,7 +79,7 @@ def _seed_settings(db, active_provider="primary", active_model="primary-model", 
         )
         db.add(row)
     else:
-        row.ai_enabled = True
+        row.ai_enabled = ai_enabled
         row.active_provider = active_provider
         row.active_model = active_model
         row.fallback_provider = fallback_provider
@@ -114,6 +114,30 @@ def test_fallback_when_primary_fails():
         result = orchestrator.classify_task(title="Task", description="desc")
         assert result.provider_used == "rules"
         assert result.fallback_used is True
+    finally:
+        db.close()
+
+
+def test_disabled_ai_uses_rules_even_if_stored_fallback_is_not_rules():
+    db = SessionLocal()
+    try:
+        _seed_settings(db, fallback_provider="primary", ai_enabled=False)
+        orchestrator = AIOrchestratorService(
+            db,
+            provider_registry=ProviderRegistry([_FakePrimaryProvider(), _FakeFallbackProvider()]),
+        )
+        result = orchestrator.classify_task(title="Task", description="desc")
+        health = orchestrator.provider_health()
+
+        assert result.provider_used == "rules"
+        assert result.fallback_used is True
+        assert health == [
+            {
+                "provider_name": "rules",
+                "ok": True,
+                "message": "AI is disabled. Rules fallback is active.",
+            }
+        ]
     finally:
         db.close()
 
