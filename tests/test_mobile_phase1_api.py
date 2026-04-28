@@ -333,3 +333,63 @@ def test_recurring_completion_returns_refresh_required_and_creates_completed_sna
         assert any(item["status"] == "pending" for item in recurring_items)
     finally:
         db.close()
+
+
+def test_mobile_reopens_completed_recurring_snapshot_as_one_off_task():
+    client = TestClient(app)
+    db = SessionLocal()
+    try:
+        owner, _owner_password = _create_user(db, label="mobile-recurring-reopen-owner")
+        mobile_user, mobile_password = _create_user(db, label="mobile-recurring-reopen-member")
+        headers, _payload = _login_headers(client, email=mobile_user.email, password=mobile_password)
+        today = date.today()
+        recurring = _create_task(
+            db,
+            title="Recurring reopen",
+            created_by_id=owner.id,
+            assignee_id=mobile_user.id,
+            assignment_date=today,
+            due_date=today,
+            status=TaskStatus.PENDING,
+            recurrence_pattern="weekly",
+            recurrence_interval_weeks=1,
+            recurrence_anchor_date=today,
+        )
+
+        complete_response = client.patch(
+            f"/api/v1/mobile/tasks/{recurring.id}/status",
+            headers=headers,
+            json={"status": "completed"},
+        )
+        assert complete_response.status_code == 200
+        db.refresh(recurring)
+        next_due_date = recurring.due_date
+        snapshot = (
+            db.query(Task)
+            .filter(Task.recurrence_parent_id == recurring.id, Task.status == TaskStatus.COMPLETED)
+            .one()
+        )
+
+        reopen_response = client.patch(
+            f"/api/v1/mobile/tasks/{snapshot.id}/status",
+            headers=headers,
+            json={"status": "pending"},
+        )
+
+        assert reopen_response.status_code == 200
+        reopen_payload = reopen_response.json()
+        assert reopen_payload["refresh_required"] is False
+        assert reopen_payload["task"]["status"] == "pending"
+        assert reopen_payload["task"]["recurrence_parent_id"] is None
+        assert reopen_payload["task"]["recurrence_summary"] is None
+
+        db.refresh(snapshot)
+        db.refresh(recurring)
+        assert snapshot.status == TaskStatus.PENDING
+        assert snapshot.recurrence_parent_id is None
+        assert snapshot.recurrence_pattern is None
+        assert recurring.status == TaskStatus.PENDING
+        assert recurring.due_date == next_due_date
+        assert recurring.recurrence_pattern == "weekly"
+    finally:
+        db.close()

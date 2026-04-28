@@ -32,7 +32,7 @@
       <span class="rounded-full border border-slate-200 px-2.5 py-1 dark:border-slate-800">Unassigned</span>
       {% endif %}
     </div>
-    {% if can_update_status and not is_history_occurrence %}
+    {% if can_update_status %}
     <form method="post" action="/tasks/{{ task.id }}/status" class="flex items-center gap-2">
       <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
       <select
@@ -46,8 +46,6 @@
       </select>
       <span class="text-xs text-slate-500 dark:text-slate-400">Updates immediately</span>
     </form>
-    {% elif is_history_occurrence %}
-    <span class="text-xs text-slate-500 dark:text-slate-400">Completed recurring history is read-only.</span>
     {% endif %}
   </div>
   <div class="flex justify-end">

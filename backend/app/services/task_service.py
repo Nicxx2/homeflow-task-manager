@@ -133,6 +133,21 @@ class TaskService:
     def get_task(self, task_id: int) -> Task | None:
         return self.db.get(Task, task_id)
 
+    @staticmethod
+    def _clear_recurrence_metadata(task: Task) -> None:
+        task.recurrence_parent_id = None
+        task.recurrence_pattern = None
+        task.recurrence_interval_weeks = None
+        task.recurrence_until = None
+        task.recurrence_count_limit = None
+        task.recurrence_blocked_behavior = None
+        task.recurrence_anchor_date = None
+        task.recurrence_occurrence_index = None
+
+    @staticmethod
+    def _is_recurring_occurrence_copy(task: Task) -> bool:
+        return task.recurrence_parent_id is not None
+
     def _updated_recurrence_anchor_date(
         self,
         *,
@@ -151,30 +166,39 @@ class TaskService:
         return payload.due_date
 
     def update_task(self, task: Task, payload: TaskUpdate, *, recurrence_series_due_date: date | None = None) -> Task:
+        was_recurring_occurrence_copy = self._is_recurring_occurrence_copy(task)
+        should_detach_occurrence_copy = (
+            was_recurring_occurrence_copy
+            and (payload.status != TaskStatus.COMPLETED or payload.due_date != task.due_date)
+        )
+        if should_detach_occurrence_copy:
+            self._clear_recurrence_metadata(task)
+
         task.title = payload.title.strip()
         task.description = payload.description.strip()
         task.due_date = payload.due_date
         task.effort_level = payload.effort_level
         task.points_value = self._points_for_level(payload.effort_level)
         task.status = payload.status
-        task.recurrence_pattern = payload.recurrence_pattern
-        task.recurrence_interval_weeks = payload.recurrence_interval_weeks
-        task.recurrence_until = payload.recurrence_until
-        task.recurrence_count_limit = payload.recurrence_count_limit
-        task.recurrence_blocked_behavior = payload.recurrence_blocked_behavior
-        task.recurrence_anchor_date = self._updated_recurrence_anchor_date(
-            task=task,
-            payload=payload,
-            recurrence_series_due_date=recurrence_series_due_date,
-        )
-        if payload.recurrence_pattern:
-            task.recurrence_occurrence_index = (
-                task.recurrence_occurrence_index
-                if task.recurrence_pattern == "weekly" and task.recurrence_occurrence_index is not None
-                else 0
+        if not was_recurring_occurrence_copy:
+            task.recurrence_pattern = payload.recurrence_pattern
+            task.recurrence_interval_weeks = payload.recurrence_interval_weeks
+            task.recurrence_until = payload.recurrence_until
+            task.recurrence_count_limit = payload.recurrence_count_limit
+            task.recurrence_blocked_behavior = payload.recurrence_blocked_behavior
+            task.recurrence_anchor_date = self._updated_recurrence_anchor_date(
+                task=task,
+                payload=payload,
+                recurrence_series_due_date=recurrence_series_due_date,
             )
-        else:
-            task.recurrence_occurrence_index = None
+            if payload.recurrence_pattern:
+                task.recurrence_occurrence_index = (
+                    task.recurrence_occurrence_index
+                    if task.recurrence_pattern == "weekly" and task.recurrence_occurrence_index is not None
+                    else 0
+                )
+            else:
+                task.recurrence_occurrence_index = None
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)
@@ -187,6 +211,8 @@ class TaskService:
             and status == TaskStatus.COMPLETED
         ):
             return RecurringTaskService(self.db).complete_occurrence(task)
+        if self._is_recurring_occurrence_copy(task) and status != TaskStatus.COMPLETED:
+            self._clear_recurrence_metadata(task)
         task.status = status
         self.db.add(task)
         self.db.commit()
@@ -194,6 +220,10 @@ class TaskService:
         return task
 
     def assign_task(self, task: Task, *, assignee_id: int | None, assignment_date: date | None) -> Task:
+        if self._is_recurring_occurrence_copy(task) and (
+            task.status != TaskStatus.COMPLETED or assignment_date != task.assignment_date
+        ):
+            self._clear_recurrence_metadata(task)
         task.assignee_id = assignee_id
         task.assignment_date = assignment_date
         self.db.add(task)
@@ -209,6 +239,12 @@ class TaskService:
         assignee_id: int | None,
         assignment_date: date | None,
     ) -> Task:
+        if self._is_recurring_occurrence_copy(task) and (
+            task.status != TaskStatus.COMPLETED
+            or due_date != task.due_date
+            or assignment_date != task.assignment_date
+        ):
+            self._clear_recurrence_metadata(task)
         task.due_date = due_date
         task.assignee_id = assignee_id
         task.assignment_date = assignment_date

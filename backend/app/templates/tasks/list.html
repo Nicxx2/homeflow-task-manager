@@ -137,11 +137,9 @@
       </div>
     </div>
     <div class="flex items-center gap-3">
-      {% if not (task.status.value == "completed" and task.recurrence_parent_id) %}
       {% set assignable_users = assignable_users_by_task.get(task.id, []) %}
       {% set redirect_to = current_page_url %}
       {% include "tasks/partials/quick_schedule_popover.html" %}
-      {% endif %}
       {% if user.is_admin or task.assignee_id == user.id %}
       <form method="post" action="/tasks/{{ task.id }}/status">
         <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />

@@ -47,7 +47,7 @@ def _can_delete_task(*, viewer: User, task) -> bool:
 
 
 def _can_update_task_status(*, viewer: User, task) -> bool:
-    return not _is_history_occurrence(task) and (viewer.is_admin or task.assignee_id == viewer.id)
+    return viewer.is_admin or task.assignee_id == viewer.id
 
 
 def _can_override_schedule_for_assignment(*, viewer: User, assignee_id: int | None) -> bool:
@@ -331,7 +331,7 @@ def _task_detail_context(
         "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
         "assignment_feedback": assignment_feedback,
         "current_page_url": current_page_url,
-        "can_manage_task": _can_manage_task(viewer=user, task=task) and not is_history_occurrence,
+        "can_manage_task": _can_manage_task(viewer=user, task=task),
         "can_delete_task": _can_delete_task(viewer=user, task=task),
         "can_update_status": _can_update_task_status(viewer=user, task=task),
         "is_history_occurrence": is_history_occurrence,
@@ -475,6 +475,7 @@ def _task_edit_context(
         "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
         "recurrence_preview": recurrence_preview,
         "is_recurring_root": task.recurrence_pattern == "weekly" and task.recurrence_parent_id is None,
+        "is_recurring_occurrence_copy": task.recurrence_parent_id is not None,
         "recurrence_series_due_date_input_value": (
             recurrence_preview["series_due_date_input_value"] if recurrence_preview else ""
         ),
@@ -1251,7 +1252,7 @@ def task_edit_page(
     task = service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
+    if not _can_manage_task(viewer=user, task=task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
     redirect_target = redirect_to or f"/tasks/{task.id}"
     return templates.TemplateResponse(
@@ -1296,7 +1297,7 @@ def task_edit_submit(
     task = service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
+    if not _can_manage_task(viewer=user, task=task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
     redirect_target = redirect_to or f"/tasks/{task.id}"
     form_values = {
@@ -1357,29 +1358,38 @@ def task_edit_submit(
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    try:
-        recurrence_values = _parse_recurrence_form(
-            repeat_weekly=repeat_weekly,
-            recurrence_interval_weeks=recurrence_interval_weeks,
-            recurrence_until=recurrence_until,
-            recurrence_count_limit=recurrence_count_limit,
-            recurrence_blocked_behavior=recurrence_blocked_behavior,
-        )
-    except ValueError:
-        return templates.TemplateResponse(
-            "tasks/edit.html",
-            _task_edit_context(
-                request=request,
-                user=user,
-                db=db,
-                task=task,
-                redirect_target=redirect_target,
-                form_error="Please provide valid recurring task settings before saving.",
-                form_values=form_values,
-                assignment_feedback=None,
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+    if task.recurrence_parent_id is not None:
+        recurrence_values = {
+            "recurrence_pattern": None,
+            "recurrence_interval_weeks": None,
+            "recurrence_until": None,
+            "recurrence_count_limit": None,
+            "recurrence_blocked_behavior": None,
+        }
+    else:
+        try:
+            recurrence_values = _parse_recurrence_form(
+                repeat_weekly=repeat_weekly,
+                recurrence_interval_weeks=recurrence_interval_weeks,
+                recurrence_until=recurrence_until,
+                recurrence_count_limit=recurrence_count_limit,
+                recurrence_blocked_behavior=recurrence_blocked_behavior,
+            )
+        except ValueError:
+            return templates.TemplateResponse(
+                "tasks/edit.html",
+                _task_edit_context(
+                    request=request,
+                    user=user,
+                    db=db,
+                    task=task,
+                    redirect_target=redirect_target,
+                    form_error="Please provide valid recurring task settings before saving.",
+                    form_values=form_values,
+                    assignment_feedback=None,
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
 
     recurrence_series_due_date_value = None
     if recurrence_values["recurrence_pattern"] == "weekly" and task.recurrence_pattern == "weekly":
@@ -1599,7 +1609,7 @@ def task_quick_schedule_submit(
     task = task_service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    if not _can_manage_task(viewer=user, task=task) or _is_history_occurrence(task):
+    if not _can_manage_task(viewer=user, task=task):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
 
     try:
@@ -2155,7 +2165,7 @@ def day_view(
                         "task": task,
                         "can_open": _can_access_task_detail(viewer=user, task=task),
                         "can_update_status": _can_update_task_status(viewer=user, task=task),
-                        "can_manage_task": _can_manage_task(viewer=user, task=task) and not _is_history_occurrence(task),
+                        "can_manage_task": _can_manage_task(viewer=user, task=task),
                         "assignable_users": _assignable_users_for_task(db, task),
                     }
                     for task in tasks

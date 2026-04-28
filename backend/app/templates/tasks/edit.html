@@ -156,6 +156,7 @@
       </label>
     </div>
   </details>
+  {% if not is_recurring_occurrence_copy %}
   <details class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
     <summary class="cursor-pointer list-none">
       <div class="flex items-center justify-between gap-3">
@@ -240,6 +241,7 @@
       </label>
     </div>
   </details>
+  {% endif %}
   <div class="flex gap-3">
     <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save Changes</button>
     <a href="{{ redirect_to }}" class="text-slate-600 hover:underline py-2">Cancel</a>

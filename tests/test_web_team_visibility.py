@@ -18,6 +18,7 @@ from backend.app.schemas.auth import RegisterRequest
 from backend.app.schemas.task import TaskCreate
 from backend.app.services.admin_settings_service import AdminSettingsService
 from backend.app.services.auth_service import AuthService
+from backend.app.services.recurring_task_service import RecurringTaskService
 from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
 
@@ -1463,6 +1464,223 @@ def test_unrelated_user_can_open_task_but_cannot_quick_update_status():
             follow_redirects=False,
         )
         assert status_response.status_code == 403
+    finally:
+        db.close()
+
+
+def test_assignee_can_reopen_completed_recurring_occurrence_as_one_off_task():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        creator = _create_user(
+            db,
+            email=f"recurring-history-owner-{token}@example.com",
+            full_name="Recurring History Owner",
+            capacity=10,
+        )
+        assignee = _create_user(
+            db,
+            email=f"recurring-history-assignee-{token}@example.com",
+            full_name="Recurring History Assignee",
+            capacity=10,
+        )
+        first_due_date = date.today()
+        root = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Recurring History Task {token}",
+                description="Recurring history status coverage",
+                due_date=first_due_date,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_count_limit=4,
+                recurrence_blocked_behavior="skip",
+            ),
+            creator,
+        )
+        TaskService(db).assign_task(root, assignee_id=assignee.id, assignment_date=first_due_date)
+        TaskService(db).update_status(root, TaskStatus.COMPLETED)
+        db.refresh(root)
+        next_due_date = root.due_date
+        history = RecurringTaskService(db).get_history(root.id)
+        assert len(history) == 1
+        occurrence = history[0]
+
+        client = _authed_client(assignee)
+        tasks_response = client.get("/tasks?scope=mine&view=completed")
+        assert tasks_response.status_code == 200
+        assert f'action="/tasks/{occurrence.id}/status"' in tasks_response.text
+        assert f'hx-post="/tasks/{occurrence.id}/quick-schedule"' in tasks_response.text
+
+        status_response = client.post(
+            f"/tasks/{occurrence.id}/status",
+            data={"status_value": TaskStatus.IN_PROGRESS.value, "redirect_to": "/tasks?scope=mine&view=completed"},
+            follow_redirects=False,
+        )
+
+        assert status_response.status_code == 302
+        db.refresh(root)
+        db.refresh(occurrence)
+        assert occurrence.status == TaskStatus.IN_PROGRESS
+        assert occurrence.recurrence_parent_id is None
+        assert occurrence.recurrence_pattern is None
+        assert root.status == TaskStatus.PENDING
+        assert root.due_date == next_due_date
+        assert root.recurrence_pattern == "weekly"
+
+        assert RecurringTaskService(db).sync() == 0
+        assert db.get(Task, occurrence.id) is not None
+    finally:
+        db.close()
+
+
+def test_completed_recurring_occurrence_edit_is_one_off_and_hides_recurring_controls():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"recurring-history-edit-{token}@example.com",
+            full_name="Recurring History Edit",
+            capacity=10,
+        )
+        first_due_date = date.today()
+        root = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Recurring History Edit Task {token}",
+                description="Recurring history edit coverage",
+                due_date=first_due_date,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_count_limit=4,
+                recurrence_blocked_behavior="skip",
+            ),
+            viewer,
+        )
+        TaskService(db).assign_task(root, assignee_id=viewer.id, assignment_date=first_due_date)
+        TaskService(db).update_status(root, TaskStatus.COMPLETED)
+        db.refresh(root)
+        occurrence = RecurringTaskService(db).get_history(root.id)[0]
+
+        client = _authed_client(viewer)
+        edit_response = client.get(f"/tasks/{occurrence.id}/edit")
+        assert edit_response.status_code == 200
+        assert "Recurring task options" not in edit_response.text
+
+        edited_due_date = first_due_date + timedelta(days=1)
+        save_response = client.post(
+            f"/tasks/{occurrence.id}/edit",
+            data={
+                "title": f"Edited History Task {token}",
+                "description": "Edited recurring history copy",
+                "due_date": edited_due_date.isoformat(),
+                "effort_level": EffortLevel.MEDIUM.value,
+                "status_value": TaskStatus.COMPLETED.value,
+                "assignee_id_edit": str(viewer.id),
+                "assignment_date_edit": edited_due_date.isoformat(),
+                "redirect_to": f"/tasks/{occurrence.id}",
+            },
+            follow_redirects=False,
+        )
+
+        assert save_response.status_code == 302
+        db.refresh(root)
+        db.refresh(occurrence)
+        assert occurrence.title == f"Edited History Task {token}"
+        assert occurrence.due_date == edited_due_date
+        assert occurrence.assignment_date == edited_due_date
+        assert occurrence.recurrence_parent_id is None
+        assert occurrence.recurrence_pattern is None
+        assert root.status == TaskStatus.PENDING
+        assert root.recurrence_pattern == "weekly"
+    finally:
+        db.close()
+
+
+def test_completed_recurring_occurrence_metadata_edit_keeps_history_link():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"recurring-history-meta-{token}@example.com",
+            full_name="Recurring History Meta",
+            capacity=10,
+        )
+        replacement_assignee = _create_user(
+            db,
+            email=f"recurring-history-meta-assignee-{token}@example.com",
+            full_name="Recurring History Meta Assignee",
+            capacity=10,
+        )
+        first_due_date = date.today()
+        root = TaskService(db).create_unassigned_task(
+            TaskCreate(
+                title=f"Recurring History Meta Task {token}",
+                description="Recurring history metadata coverage",
+                due_date=first_due_date,
+                effort_level=EffortLevel.LOW,
+                ai_suggested_level=EffortLevel.LOW,
+                ai_confidence=0.7,
+                ai_reason="test",
+                fallback_used=False,
+                provider_used="rules",
+                model_used="rules-default",
+                recurrence_pattern="weekly",
+                recurrence_interval_weeks=1,
+                recurrence_count_limit=4,
+                recurrence_blocked_behavior="skip",
+            ),
+            viewer,
+        )
+        TaskService(db).assign_task(root, assignee_id=viewer.id, assignment_date=first_due_date)
+        TaskService(db).update_status(root, TaskStatus.COMPLETED)
+        db.refresh(root)
+        occurrence = RecurringTaskService(db).get_history(root.id)[0]
+
+        response = _authed_client(viewer).post(
+            f"/tasks/{occurrence.id}/edit",
+            data={
+                "title": f"Corrected History Task {token}",
+                "description": "Corrected completed occurrence notes",
+                "due_date": first_due_date.isoformat(),
+                "effort_level": EffortLevel.MEDIUM.value,
+                "status_value": TaskStatus.COMPLETED.value,
+                "assignee_id_edit": str(replacement_assignee.id),
+                "assignment_date_edit": first_due_date.isoformat(),
+                "redirect_to": f"/tasks/{occurrence.id}",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        db.refresh(root)
+        db.refresh(occurrence)
+        assert occurrence.title == f"Corrected History Task {token}"
+        assert occurrence.description == "Corrected completed occurrence notes"
+        assert occurrence.effort_level == EffortLevel.MEDIUM
+        assert occurrence.assignee_id == replacement_assignee.id
+        assert occurrence.assignment_date == first_due_date
+        assert occurrence.status == TaskStatus.COMPLETED
+        assert occurrence.recurrence_parent_id == root.id
+        assert root.status == TaskStatus.PENDING
+        assert root.recurrence_pattern == "weekly"
     finally:
         db.close()
 
