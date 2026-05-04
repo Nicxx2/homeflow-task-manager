@@ -20,11 +20,13 @@ Current mobile scope:
 - secure sign-in to the user's own server
 - sign-in assumes an existing approved account on that server
 - saved login and session restoration on app reopen
-- today-first task workflow
+- today-first task workflow with active, overdue, and completed sections
 - upcoming task view
-- task detail and status changes
+- task detail, quick status changes, and online date adjustment
+- backend capacity checks for assignment-date changes
+- optional capacity extension when the signed-in user chooses to take on extra work
 - rolling offline cache window
-- sync, offline, and stale-cache messaging
+- offline status-change queueing, sync, and stale-cache messaging
 - Android daily reminder notifications backed by cached tasks
 - notification preference persistence across app restarts
 - improved auth/status handling on refresh and app resume

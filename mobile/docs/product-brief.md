@@ -21,6 +21,7 @@ Keep the mobile app practical, reliable, and logical:
 - show today's tasks clearly
 - refresh from the user's own server when reachable
 - update task status quickly from the phone
+- adjust due dates and personal assignment dates while connected to the server
 - optionally expose a simple home screen widget for quick visibility
 - optionally expose simple daily reminder notifications based on cached tasks
 
@@ -46,7 +47,8 @@ Keep the mobile app practical, reliable, and logical:
 6. App fetches tasks relevant to the logged-in user.
 7. App opens to today's tasks first.
 8. User updates task status quickly from the phone.
-9. If the server later becomes unreachable, the app still shows previously cached task data and explains the sync state clearly.
+9. User can adjust task dates while connected, with server-side capacity validation.
+10. If the server later becomes unreachable, the app still shows previously cached task data and explains the sync state clearly.
 
 ## V1 Scope
 
@@ -63,9 +65,12 @@ Keep the mobile app practical, reliable, and logical:
 - connect to a self-hosted Homeflow server
 - support secure sign-in
 - fetch tasks relevant to the logged-in user
-- show today's tasks first
+- show today's active, overdue, and completed assignment-date work first
 - show the next upcoming days
 - update task status
+- queue status changes while offline and sync them later
+- adjust due dates and assignment dates while online
+- validate assignment-date changes against backend capacity rules
 - cache a practical rolling window of task data locally
 - show last sync time and last sync result
 - show clear offline and server-unreachable states
@@ -78,8 +83,8 @@ Keep the mobile app practical, reliable, and logical:
 
 - full admin features
 - task creation
-- task editing beyond status changes
-- advanced scheduling management
+- broad task editing beyond personal status and date changes
+- advanced admin scheduling management
 - reporting or analytics views
 - complex widget actions
 

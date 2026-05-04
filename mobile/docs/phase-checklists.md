@@ -13,6 +13,7 @@ If any item fails, the phase should remain open until the issue is fixed or expl
 - today and window queries return stable ordering
 - task payload includes status, dates, assignee, and update timestamp
 - status update route does not require full task replacement
+- schedule routes validate assignment dates, capacity, and next-available suggestions
 - auth failures and validation failures are distinguishable
 
 ## Phase 2: App Skeleton
@@ -29,6 +30,7 @@ If any item fails, the phase should remain open until the issue is fixed or expl
 - today screen prioritizes active tasks
 - upcoming screen distinguishes uncached future days from empty days
 - task detail reflects the same status and sync state as list screens
+- date-edit actions are online-only and show backend validation errors clearly
 - settings screen exposes the actual cache window and last sync state
 
 ## Phase 4: Offline Reliability
@@ -38,6 +40,8 @@ If any item fails, the phase should remain open until the issue is fixed or expl
 - auth required state is labeled
 - server error state is labeled
 - user can still read previously synced tasks when refresh fails
+- queued status changes sync when the server becomes reachable again
+- schedule and capacity changes are not queued while offline
 
 ## Phase 5: Widget
 

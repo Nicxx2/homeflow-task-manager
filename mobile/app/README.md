@@ -7,7 +7,11 @@ Current implementation includes:
 - connection and login flow for self-hosted Homeflow servers
 - secure session storage and saved login support
 - today, upcoming, task detail, and settings screens
+- active, overdue, and completed task sections for the signed-in user's day
+- quick status changes with offline queueing and later sync
+- online due date and assignment date editing with backend capacity validation
 - local cache and offline sync handling
+- Android daily reminder support
 - Android widget snapshot support
 - Android project files in `android/`
 

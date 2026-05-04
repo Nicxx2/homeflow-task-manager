@@ -38,6 +38,7 @@ Suggested options:
 When server is reachable:
 
 - authenticate using the stored token
+- sync any pending offline status changes first when possible
 - refresh the whole selected cache window
 - update local storage
 - update last successful sync time
@@ -90,6 +91,7 @@ Minimum local data to store:
 - auth token in secure storage
 - server connection settings
 - cached task records for the selected window
+- pending status changes that were made while offline
 - last successful sync timestamp
 - last sync result
 - the configured offline cache window
@@ -101,6 +103,17 @@ Task cache should be keyed by:
 - date window
 
 This avoids cross-contaminating data if the user changes server settings or logs into a different server.
+
+## Offline Write Scope
+
+Status changes can be queued while offline because they are small, user-owned actions that can be retried safely when the server is reachable again.
+
+Schedule and capacity changes should stay online-only:
+
+- due date edits need the latest server task state
+- assignment date edits need backend date validation
+- capacity checks and capacity extension need live server confirmation
+- failed schedule saves should leave the cached task unchanged and show a clear error
 
 ## Messaging Examples
 
@@ -116,5 +129,6 @@ This avoids cross-contaminating data if the user changes server settings or logs
 - pull to refresh
 - manual refresh from Settings
 - widget refresh when supported by platform limits
+- returning online after pending status changes exist
 
 Auto-refresh should be conservative in V1. Reliability and clarity matter more than aggressive background sync behavior.

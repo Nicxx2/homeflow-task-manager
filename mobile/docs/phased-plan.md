@@ -60,6 +60,7 @@ Create a backend contract that is safe for the mobile client to depend on.
 
 - mobile-oriented task read endpoints
 - status-only task update endpoint
+- online schedule check, next-available, and schedule update endpoints
 - predictable error payloads
 - task payload includes fields required for mobile ordering and sync
 - health or lightweight reachability behavior confirmed
@@ -72,6 +73,9 @@ Create a backend contract that is safe for the mobile client to depend on.
 - `GET /api/v1/mobile/tasks/window?start=YYYY-MM-DD&end=YYYY-MM-DD`
 - `GET /api/v1/mobile/tasks/{task_id}`
 - `PATCH /api/v1/mobile/tasks/{task_id}/status`
+- `GET /api/v1/mobile/tasks/{task_id}/schedule/check?assignment_date=YYYY-MM-DD`
+- `GET /api/v1/mobile/tasks/{task_id}/schedule/next-available?start_date=YYYY-MM-DD`
+- `PATCH /api/v1/mobile/tasks/{task_id}/schedule`
 
 ### Dependencies
 
@@ -97,6 +101,7 @@ Create a backend contract that is safe for the mobile client to depend on.
 - test task window filtering for the logged-in user
 - test today ordering
 - test status update success and invalid transition handling
+- test assignment-date validation, blocked-capacity handling, next-available suggestions, and explicit capacity extension
 - test unreachable-server and server-error behaviors separately
 
 ## Phase 2: Mobile App Skeleton
@@ -178,6 +183,7 @@ Build the user-facing screens on top of the stable app shell.
 - today view with active and completed tasks
 - upcoming view with cached and uncached days
 - task detail status change round-trip
+- online task date update and validation-error flows
 - settings change updates sync behavior correctly
 
 ## Phase 4: Offline Reliability
@@ -218,6 +224,8 @@ Harden the app so offline and partial-failure cases are correct rather than mere
 - server online but 500 error
 - stale cache older than expected
 - future day outside cache window
+- offline status-change queue and later sync
+- online-only schedule editing when server validation is unavailable
 
 ## Phase 5: Widget V1
 

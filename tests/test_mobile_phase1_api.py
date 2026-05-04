@@ -11,6 +11,7 @@ from backend.app.models.enums import EffortLevel, TaskStatus
 from backend.app.models.task import Task
 from backend.app.models.user import User
 from backend.app.models.user_daily_capacity import UserDailyCapacity
+from backend.app.models.user_daily_capacity_override import UserDailyCapacityOverride
 
 
 def setup_module():
@@ -142,6 +143,24 @@ def test_mobile_today_window_detail_and_assigned_scope():
             due_date=today + timedelta(days=1),
             status=TaskStatus.PENDING,
         )
+        today_assigned_due_past = _create_task(
+            db,
+            title="Today assigned due past",
+            created_by_id=owner.id,
+            assignee_id=mobile_user.id,
+            assignment_date=today,
+            due_date=today - timedelta(days=1),
+            status=TaskStatus.PENDING,
+        )
+        future_assigned_due_past = _create_task(
+            db,
+            title="Future assigned due past",
+            created_by_id=owner.id,
+            assignee_id=mobile_user.id,
+            assignment_date=today + timedelta(days=10),
+            due_date=today - timedelta(days=1),
+            status=TaskStatus.PENDING,
+        )
         today_completed = _create_task(
             db,
             title="Today completed",
@@ -185,17 +204,28 @@ def test_mobile_today_window_detail_and_assigned_scope():
         assert [item["title"] for item in today_payload["tasks"]] == [
             "Overdue in progress",
             "Overdue pending",
+            "Future assigned due past",
             "Today in progress",
+            "Today assigned due past",
             "Today pending",
             "Today completed",
         ]
         assert [item["display_bucket"] for item in today_payload["tasks"]] == [
             "overdue",
             "overdue",
+            "overdue",
+            "today",
             "today",
             "today",
             "completed",
         ]
+        today_due_past_payload = next(
+            item for item in today_payload["tasks"] if item["id"] == today_assigned_due_past.id
+        )
+        assert today_due_past_payload["display_bucket"] == "today"
+        assert today_due_past_payload["is_overdue"] is True
+        assert [item["id"] for item in today_payload["tasks"]].count(today_assigned_due_past.id) == 1
+        assert [item["id"] for item in today_payload["tasks"]].count(future_assigned_due_past.id) == 1
 
         window_response = client.get(
             f"/api/v1/mobile/tasks/window?start={(today - timedelta(days=1)).isoformat()}&end={(today + timedelta(days=3)).isoformat()}",
@@ -206,10 +236,12 @@ def test_mobile_today_window_detail_and_assigned_scope():
         assert [item["title"] for item in window_payload["tasks"]] == [
             "Overdue in progress",
             "Overdue pending",
+            "Future assigned due past",
             "Today in progress",
+            "Today assigned due past",
             "Today pending",
-            "Future pending",
             "Today completed",
+            "Future pending",
         ]
 
         detail_response = client.get(f"/api/v1/mobile/tasks/{today_pending.id}", headers=headers)
@@ -279,6 +311,141 @@ def test_mobile_status_update_and_error_payloads():
         bad_window_payload = bad_window.json()
         assert bad_window_payload["code"] == "invalid_request"
         assert bad_window_payload["detail"] == "End date must be on or after start date."
+    finally:
+        db.close()
+
+
+def test_mobile_schedule_update_uses_capacity_and_assignment_date_rules():
+    client = TestClient(app)
+    db = SessionLocal()
+    try:
+        owner, _owner_password = _create_user(db, label="mobile-schedule-owner")
+        mobile_user, mobile_password = _create_user(db, label="mobile-schedule-member")
+        other_user, _other_password = _create_user(db, label="mobile-schedule-other")
+        db.add(UserDailyCapacity(user_id=mobile_user.id, daily_capacity_points=6))
+        db.commit()
+        headers, _payload = _login_headers(client, email=mobile_user.email, password=mobile_password)
+
+        today = date.today()
+        existing = _create_task(
+            db,
+            title="Existing load",
+            created_by_id=owner.id,
+            assignee_id=mobile_user.id,
+            assignment_date=today + timedelta(days=1),
+            due_date=today + timedelta(days=1),
+            status=TaskStatus.PENDING,
+            effort_level=EffortLevel.LOW,
+        )
+        task = _create_task(
+            db,
+            title="Schedule me",
+            created_by_id=owner.id,
+            assignee_id=mobile_user.id,
+            assignment_date=today,
+            due_date=today,
+            status=TaskStatus.PENDING,
+            effort_level=EffortLevel.MEDIUM,
+        )
+        other_task = _create_task(
+            db,
+            title="Other schedule",
+            created_by_id=owner.id,
+            assignee_id=other_user.id,
+            assignment_date=today,
+            due_date=today,
+            status=TaskStatus.PENDING,
+        )
+
+        blocked_response = client.patch(
+            f"/api/v1/mobile/tasks/{task.id}/schedule",
+            headers=headers,
+            json={
+                "due_date": (today + timedelta(days=1)).isoformat(),
+                "assignment_date": (today + timedelta(days=1)).isoformat(),
+            },
+        )
+        assert blocked_response.status_code == 400
+        assert blocked_response.json()["detail"] == "Assignment exceeds daily capacity."
+
+        next_response = client.get(
+            f"/api/v1/mobile/tasks/{task.id}/schedule/next-available?start_date={(today + timedelta(days=1)).isoformat()}",
+            headers=headers,
+        )
+        assert next_response.status_code == 200
+        assert next_response.json()["assignment_date"] == (today + timedelta(days=2)).isoformat()
+
+        check_response = client.get(
+            f"/api/v1/mobile/tasks/{task.id}/schedule/check?assignment_date={(today + timedelta(days=2)).isoformat()}",
+            headers=headers,
+        )
+        assert check_response.status_code == 200
+        assert check_response.json()["valid"] is True
+
+        update_response = client.patch(
+            f"/api/v1/mobile/tasks/{task.id}/schedule",
+            headers=headers,
+            json={
+                "due_date": (today + timedelta(days=3)).isoformat(),
+                "assignment_date": (today + timedelta(days=2)).isoformat(),
+            },
+        )
+        assert update_response.status_code == 200
+        payload = update_response.json()
+        assert payload["task"]["due_date"] == (today + timedelta(days=3)).isoformat()
+        assert payload["task"]["assignment_date"] == (today + timedelta(days=2)).isoformat()
+        assert payload["feedback"]["valid"] is True
+
+        db.refresh(task)
+        db.refresh(existing)
+        assert task.assignment_date == today + timedelta(days=2)
+        assert existing.assignment_date == today + timedelta(days=1)
+
+        past_response = client.patch(
+            f"/api/v1/mobile/tasks/{task.id}/schedule",
+            headers=headers,
+            json={
+                "due_date": today.isoformat(),
+                "assignment_date": (today - timedelta(days=1)).isoformat(),
+            },
+        )
+        assert past_response.status_code == 400
+        assert past_response.json()["detail"] == "Assignment date cannot be in the past."
+
+        hidden_response = client.patch(
+            f"/api/v1/mobile/tasks/{other_task.id}/schedule",
+            headers=headers,
+            json={
+                "due_date": today.isoformat(),
+                "assignment_date": today.isoformat(),
+            },
+        )
+        assert hidden_response.status_code == 404
+
+        extend_response = client.patch(
+            f"/api/v1/mobile/tasks/{task.id}/schedule",
+            headers=headers,
+            json={
+                "due_date": (today + timedelta(days=1)).isoformat(),
+                "assignment_date": (today + timedelta(days=1)).isoformat(),
+                "extend_capacity": True,
+            },
+        )
+        assert extend_response.status_code == 200
+        extend_payload = extend_response.json()
+        assert extend_payload["task"]["assignment_date"] == (today + timedelta(days=1)).isoformat()
+        assert extend_payload["feedback"]["valid"] is True
+        assert extend_payload["feedback"]["capacity"] == 7
+
+        override = db.get(
+            UserDailyCapacityOverride,
+            {"user_id": mobile_user.id, "override_date": today + timedelta(days=1)},
+        )
+        assert override is not None
+        assert override.extra_capacity_points == 1
+
+        db.refresh(task)
+        assert task.assignment_date == today + timedelta(days=1)
     finally:
         db.close()
 

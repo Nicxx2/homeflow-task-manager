@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as Date, datetime
 
 from pydantic import BaseModel
 
@@ -10,8 +10,8 @@ class MobileTaskRead(BaseModel):
     title: str
     description: str
     status: TaskStatus
-    due_date: date
-    assignment_date: date | None
+    due_date: Date
+    assignment_date: Date | None
     assignee_id: int | None
     effort_level: EffortLevel
     points_value: int
@@ -26,8 +26,8 @@ class MobileTaskRead(BaseModel):
 
 class MobileTaskWindowResponse(BaseModel):
     server_time: datetime
-    window_start: date
-    window_end: date
+    window_start: Date
+    window_end: Date
     tasks: list[MobileTaskRead]
 
 
@@ -39,3 +39,35 @@ class MobileTaskStatusUpdateResponse(BaseModel):
     server_time: datetime
     refresh_required: bool = False
     task: MobileTaskRead | None = None
+
+
+class MobileTaskScheduleRequest(BaseModel):
+    due_date: Date
+    assignment_date: Date
+    extend_capacity: bool = False
+
+
+class MobileTaskScheduleFeedback(BaseModel):
+    valid: bool
+    message: str
+    date: Date | None = None
+    task_points: int | None = None
+    current_points: int | None = None
+    projected_points: int | None = None
+    capacity: int | None = None
+    is_past_date: bool = False
+    task_too_large: bool = False
+    blocked_by_policy: bool = False
+    next_available_date: Date | None = None
+
+
+class MobileTaskScheduleUpdateResponse(BaseModel):
+    server_time: datetime
+    task: MobileTaskRead
+    feedback: MobileTaskScheduleFeedback
+
+
+class MobileTaskNextAvailableResponse(BaseModel):
+    ok: bool
+    message: str
+    assignment_date: Date | None = None

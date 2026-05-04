@@ -196,14 +196,17 @@ If someone is away or has blocked days
 
 ---
 
-## ✨ What is new in v2.4.3
+## ✨ What is new in v2.5
 
-- Edit task now uses the same familiar assign-now flow as task creation, with current assignee and assignment date prefilled when a task is already planned.
-- Assignment changes made during editing now re-check availability correctly when the assignee, assignment day, or effort level changes, with the same next-free suggestion flow used elsewhere in the app.
-- Past due dates can now be recorded cleanly for overdue work, while assignment planning stays on valid future-facing dates across the app's scheduling shortcuts.
-- Admins can now remove users safely from the admin panel without deleting tasks. Assigned tasks become unassigned, assignment dates are cleared, and created tasks stay in the system.
-- Admins can now control the public login page: show or hide registration, auto-approve new registrations, apply a default daily capacity for new public accounts, and choose the default login-page theme.
-- When public registration is turned off, the login page switches to a cleaner sign-in-only layout while still handling direct registration attempts safely.
+- Mobile Today is now assignment-date first, so active and completed work reflects what is planned for the signed-in user today.
+- Completed mobile tasks no longer reappear later just because their due date arrives.
+- Mobile overdue handling now stays clearer: tasks assigned today remain in Today, with a compact overdue label when their due date has already passed.
+- Mobile task dates can now be adjusted quickly while connected to the server, with due date and assignment date controls built for the smaller mobile flow.
+- Mobile scheduling uses backend capacity checks, next-available suggestions, and the same date rules as the web app: due dates can be in the past, but assignment dates cannot.
+- Users can explicitly extend their own capacity for a selected day when adding a task would exceed available points.
+- Offline status changes are queued locally and synced when the server is reachable again; date and capacity changes stay online-only so validation remains reliable.
+- Mobile date picking and the date-edit sheet were polished for real devices, including calendar-day accuracy and bottom navigation safe-area spacing.
+- Web overdue task cards now visually match the backend overdue rule, including tasks overdue by assignment date.
 
 ---
 
@@ -272,6 +275,10 @@ Homeflow also includes an Android companion app for self-hosted servers.
 - mobile source: `mobile/app/`
 - supporting mobile docs: `mobile/docs/`
 - a good starting point for implementation details: `mobile/docs/implementation-spec.md`
+- today-first mobile views with active, overdue, and completed assignment-date work
+- quick mobile status changes with offline queueing and later sync
+- online mobile date editing with backend capacity validation
+- Android reminders and widget snapshot support backed by cached tasks
 
 Typical Android development commands:
 

@@ -9,6 +9,7 @@ import '../../core/models/app_preferences.dart';
 import '../../core/models/mobile_task.dart';
 import '../widgets/sync_status_strip.dart';
 import '../widgets/task_preview_list.dart';
+import '../widgets/task_schedule_sheet.dart';
 import 'task_detail_shell_screen.dart';
 
 class HomeShellScreen extends StatelessWidget {
@@ -109,7 +110,7 @@ class _TodayTabState extends State<_TodayTab> {
     final completedTasks = controller.completedTodayTasks;
     final showOverdueSection =
         controller.preferences.showOverdueTasksInTodayView &&
-        overdueTasks.isNotEmpty;
+            overdueTasks.isNotEmpty;
     final availableSections = <_TodaySection>[
       _TodaySection.active,
       if (showOverdueSection) _TodaySection.overdue,
@@ -126,9 +127,10 @@ class _TodayTabState extends State<_TodayTab> {
     final now = DateTime.now().toUtc();
     final today = DateTime.utc(now.year, now.month, now.day);
     final emptyMessage = switch (selectedSection) {
-      _TodaySection.active => completedTasks.isNotEmpty || overdueTasks.isNotEmpty
-          ? 'No active tasks remain for today.'
-          : controller.messageForDay(today),
+      _TodaySection.active =>
+        completedTasks.isNotEmpty || overdueTasks.isNotEmpty
+            ? 'No active tasks remain for today.'
+            : controller.messageForDay(today),
       _TodaySection.overdue => 'No overdue tasks right now.',
       _TodaySection.completed => 'No tasks have been completed today yet.',
     };
@@ -176,6 +178,7 @@ class _TodayTabState extends State<_TodayTab> {
             tasks: visibleTasks,
             emptyMessage: emptyMessage,
             isUpdatingTask: controller.isUpdatingTask,
+            isStatusPending: controller.hasPendingStatusUpdate,
             onStatusSelected: controller.canChangeTaskStatus
                 ? (task, status) async {
                     await controller.updateTaskStatus(
@@ -187,6 +190,13 @@ class _TodayTabState extends State<_TodayTab> {
             onTaskTap: (task) => Navigator.of(
               context,
             ).pushNamed(TaskDetailShellScreen.routeName, arguments: task.id),
+            onScheduleTap: controller.canChangeTaskSchedule
+                ? (task) {
+                    if (!task.isCompleted) {
+                      showTaskScheduleSheet(context, task: task);
+                    }
+                  }
+                : null,
           ),
         ),
       ],
@@ -276,6 +286,7 @@ class _UpcomingDayCard extends StatelessWidget {
             emptyMessage: controller.messageForDay(day),
             showAssignmentDate: true,
             isUpdatingTask: controller.isUpdatingTask,
+            isStatusPending: controller.hasPendingStatusUpdate,
             onStatusSelected: controller.canChangeTaskStatus
                 ? (task, status) async {
                     await controller.updateTaskStatus(
@@ -287,6 +298,13 @@ class _UpcomingDayCard extends StatelessWidget {
             onTaskTap: (task) => Navigator.of(
               context,
             ).pushNamed(TaskDetailShellScreen.routeName, arguments: task.id),
+            onScheduleTap: controller.canChangeTaskSchedule
+                ? (task) {
+                    if (!task.isCompleted) {
+                      showTaskScheduleSheet(context, task: task);
+                    }
+                  }
+                : null,
           ),
         ],
       ),

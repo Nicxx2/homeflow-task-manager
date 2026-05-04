@@ -45,10 +45,11 @@ Current app-side implementation:
 - keep the widget snapshot read-only and derived from the same cache/session state the app already trusts
 - include signed-out, no-cache, ready, stale, auth-required, empty, and error states in the exported payload
 
-Current platform limitation:
+Current platform note:
 
-- actual Android/iPhone widget host code should be added only after the Flutter `android/` and `ios/` folders are generated in the repo
-- until those platform folders exist, the stable part to implement safely is the shared widget data contract rather than guessed native project files
+- Android project files are included in the repo, so Android widget host work can build on the generated platform project.
+- iPhone widget host work still needs the usual Flutter iOS project setup on macOS with Xcode.
+- the shared widget data contract should stay read-only and derived from the same cache/session state the app already trusts.
 
 ## Refresh Expectations
 

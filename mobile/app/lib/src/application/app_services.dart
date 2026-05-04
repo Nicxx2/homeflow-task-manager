@@ -9,6 +9,7 @@ import '../data/storage/composite_local_store.dart';
 import '../data/storage/file_local_store.dart';
 import '../data/repositories/connection_repository.dart';
 import '../data/repositories/preferences_repository.dart';
+import '../data/repositories/pending_status_update_repository.dart';
 import '../data/repositories/saved_login_repository.dart';
 import '../data/repositories/session_repository.dart';
 import '../data/repositories/task_cache_repository.dart';
@@ -26,6 +27,7 @@ class AppServices {
     required this.savedLoginRepository,
     required this.sessionRepository,
     required this.preferencesRepository,
+    required this.pendingStatusUpdateRepository,
     required this.taskCacheRepository,
     required this.widgetStateRepository,
     required this.httpClient,
@@ -35,6 +37,7 @@ class AppServices {
   final SavedLoginRepository savedLoginRepository;
   final SessionRepository sessionRepository;
   final PreferencesRepository preferencesRepository;
+  final PendingStatusUpdateRepository pendingStatusUpdateRepository;
   final TaskCacheRepository taskCacheRepository;
   final WidgetStateRepository widgetStateRepository;
   final http.Client httpClient;
@@ -81,6 +84,7 @@ class AppServices {
       savedLoginRepository: SavedLoginRepository(secureStore),
       sessionRepository: SessionRepository(secureStore),
       preferencesRepository: PreferencesRepository(localStore),
+      pendingStatusUpdateRepository: PendingStatusUpdateRepository(localStore),
       taskCacheRepository: TaskCacheRepository(localStore),
       widgetStateRepository: WidgetStateRepository(localStore),
       httpClient: http.Client(),

@@ -85,6 +85,10 @@ class TaskService:
                 or_(
                     Task.assignment_date == today_value,
                     and_(
+                        Task.due_date < today_value,
+                        Task.status != TaskStatus.COMPLETED,
+                    ),
+                    and_(
                         Task.assignment_date.is_not(None),
                         Task.assignment_date < today_value,
                         Task.status != TaskStatus.COMPLETED,
@@ -104,10 +108,17 @@ class TaskService:
     ) -> list[Task]:
         date_filters = [Task.assignment_date.between(start_date, end_date)]
         if include_overdue:
+            today_value = date.today()
             date_filters.append(
                 and_(
                     Task.assignment_date.is_not(None),
-                    Task.assignment_date < start_date,
+                    Task.assignment_date < today_value,
+                    Task.status != TaskStatus.COMPLETED,
+                )
+            )
+            date_filters.append(
+                and_(
+                    Task.due_date < today_value,
                     Task.status != TaskStatus.COMPLETED,
                 )
             )
@@ -336,12 +347,13 @@ class TaskService:
             is_overdue = (
                 task.status != TaskStatus.COMPLETED
                 and (
-                    (task.assignment_date is not None and task.assignment_date < today_value)
+                    (
+                        task.assignment_date is not None
+                        and task.assignment_date < today_value
+                    )
                     or task.due_date < today_value
                 )
             )
-            if is_overdue:
-                return (0, 0 if task.status == TaskStatus.IN_PROGRESS else 1)
             if assignment == today_value:
                 status_order = {
                     TaskStatus.IN_PROGRESS: 0,
@@ -349,6 +361,8 @@ class TaskService:
                     TaskStatus.COMPLETED: 2,
                 }
                 return (1, status_order.get(task.status, 9))
+            if is_overdue:
+                return (0, 0 if task.status == TaskStatus.IN_PROGRESS else 1)
             if assignment > today_value:
                 status_order = {
                     TaskStatus.IN_PROGRESS: 0,

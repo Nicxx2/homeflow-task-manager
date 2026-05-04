@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% macro dashboard_task_link(task, today, encoded_dashboard_return_to) %}
-<a href="/tasks/{{ task.id }}?return_to={{ encoded_dashboard_return_to }}" class="{% if task.due_date < today and task.status.value != 'completed' %}app-status-overdue{% else %}app-surface{% endif %} {% if task.personal_highlight_color %}app-task-highlight{% endif %} block rounded-xl border px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800" {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}>
+<a href="/tasks/{{ task.id }}?return_to={{ encoded_dashboard_return_to }}" class="{% if task.status.value != 'completed' and (task.due_date < today or (task.assignee_id and task.assignment_date and task.assignment_date < today)) %}app-status-overdue{% else %}app-surface{% endif %} {% if task.personal_highlight_color %}app-task-highlight{% endif %} block rounded-xl border px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800" {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}>
   <div class="flex items-start justify-between gap-3">
     <div class="min-w-0">
       <p class="font-medium text-sm">{{ task.title }}</p>

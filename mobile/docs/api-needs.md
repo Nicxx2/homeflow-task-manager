@@ -12,6 +12,13 @@ Current relevant routes already in the repo:
 - `GET /api/v1/tasks/{task_id}`
 - `PUT /api/v1/tasks/{task_id}`
 - `POST /api/v1/tasks/{task_id}/assign`
+- `GET /api/v1/mobile/tasks/today`
+- `GET /api/v1/mobile/tasks/window?start=YYYY-MM-DD&end=YYYY-MM-DD`
+- `GET /api/v1/mobile/tasks/{task_id}`
+- `PATCH /api/v1/mobile/tasks/{task_id}/status`
+- `GET /api/v1/mobile/tasks/{task_id}/schedule/check?assignment_date=YYYY-MM-DD`
+- `GET /api/v1/mobile/tasks/{task_id}/schedule/next-available?start_date=YYYY-MM-DD`
+- `PATCH /api/v1/mobile/tasks/{task_id}/schedule`
 - `GET /health`
 
 Notes:
@@ -45,16 +52,13 @@ Current status values:
 
 ## Fit For Mobile Today
 
-The current API is a usable starting point for mobile login and generic task fetches, but it is not yet shaped around the main mobile workflow.
+The dedicated mobile routes are the preferred contract for the companion app. They keep the mobile client scoped to the signed-in user's day views instead of relying on generic task routes or web behavior.
 
-Main gaps for the mobile companion:
+Remaining gaps to consider later:
 
-- no dedicated "my tasks for today" endpoint
-- no dedicated "my upcoming tasks for next X days" endpoint
-- no lightweight status-only update route
 - no token refresh route
-- no mobile-focused sync envelope with server timestamp and filtered window metadata
-- current task listing logic is not clearly aligned with "assigned to the logged-in user" day views
+- no server-side token invalidation/logout route
+- no public mobile registration flow, by design for now
 
 ## Recommended Mobile-Oriented Endpoints
 
@@ -114,6 +118,8 @@ Recommended query rules:
 - server returns only tasks relevant to the authenticated user
 - completed items may still be returned, but flagged clearly and ordered after actionable items
 - ordering should match the intended day workflow, not just raw due date sorting
+- completed items should belong to the assignment date, not reappear later because the due date arrives
+- tasks assigned today with a past due date should remain in Today and expose an overdue indicator
 
 ### Status Update
 
@@ -130,6 +136,31 @@ Suggested request body:
 ```
 
 This is better for the mobile app than sending full task objects just to change one field.
+
+### Schedule Update
+
+Current:
+
+- `GET /api/v1/mobile/tasks/{task_id}/schedule/check?assignment_date=YYYY-MM-DD`
+- `GET /api/v1/mobile/tasks/{task_id}/schedule/next-available?start_date=YYYY-MM-DD`
+- `PATCH /api/v1/mobile/tasks/{task_id}/schedule`
+
+Suggested schedule update body:
+
+```json
+{
+  "due_date": "2026-05-04",
+  "assignment_date": "2026-05-04",
+  "extend_capacity": false
+}
+```
+
+Rules:
+
+- due date can be today, future, or past
+- assignment date can only be today or future
+- assignment date changes must be validated by the backend
+- capacity extension must be explicit and only applies to the signed-in user's selected assignment day
 
 ## Recommended Task Payload For Mobile
 

@@ -36,8 +36,8 @@ class SyncCoordinator {
     );
     final endDate = _dateOnly(
       DateTime.now().toUtc().add(
-        Duration(days: preferences.offlineTaskWindow.days),
-      ),
+            Duration(days: preferences.offlineTaskWindow.days),
+          ),
     );
 
     try {
@@ -121,7 +121,6 @@ class SyncCoordinator {
   }
 
   DateTime _dateOnly(DateTime value) {
-    final utc = value.toUtc();
-    return DateTime.utc(utc.year, utc.month, utc.day);
+    return DateTime.utc(value.year, value.month, value.day);
   }
 }

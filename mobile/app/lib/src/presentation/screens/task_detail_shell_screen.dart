@@ -6,6 +6,7 @@ import '../../application/app_controller.dart';
 import '../../core/date_display.dart';
 import '../../core/models/mobile_task.dart';
 import '../widgets/sync_status_strip.dart';
+import '../widgets/task_schedule_sheet.dart';
 
 class TaskDetailShellScreen extends StatelessWidget {
   const TaskDetailShellScreen({super.key});
@@ -23,6 +24,16 @@ class TaskDetailShellScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Task detail'),
         actions: [
+          if (task != null &&
+              !task.isCompleted &&
+              controller.canChangeTaskSchedule)
+            IconButton(
+              onPressed: isUpdating
+                  ? null
+                  : () => showTaskScheduleSheet(context, task: task),
+              icon: const Icon(Icons.calendar_today_outlined),
+              tooltip: 'Adjust dates',
+            ),
           if (controller.isSyncing)
             const Padding(
               padding: EdgeInsets.only(right: 20),

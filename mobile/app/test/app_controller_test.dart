@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homeflow_mobile/src/application/app_controller.dart';
 import 'package:homeflow_mobile/src/application/app_services.dart';
@@ -5,9 +7,11 @@ import 'package:homeflow_mobile/src/core/models/app_preferences.dart';
 import 'package:homeflow_mobile/src/core/models/auth_session.dart';
 import 'package:homeflow_mobile/src/core/models/connection_settings.dart';
 import 'package:homeflow_mobile/src/core/models/mobile_task.dart';
+import 'package:homeflow_mobile/src/core/models/saved_login.dart';
 import 'package:homeflow_mobile/src/core/models/task_cache_snapshot.dart';
 import 'package:homeflow_mobile/src/core/models/today_widget_snapshot.dart';
 import 'package:homeflow_mobile/src/data/repositories/connection_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/pending_status_update_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/preferences_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/saved_login_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/session_repository.dart';
@@ -21,32 +25,35 @@ import 'package:http/http.dart' as http;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('connection settings sanitize accidental scheme prefixes in host input', () {
-    const rawSettings = ConnectionSettings(
-      scheme: 'http',
-      host: 'https://demo.example.com:9443/path',
-      port: 8000,
-    );
-    expect(rawSettings.baseUrl, 'http://demo.example.com:9443');
-    expect(rawSettings.isValid, isTrue);
+  test(
+    'connection settings sanitize accidental scheme prefixes in host input',
+    () {
+      const rawSettings = ConnectionSettings(
+        scheme: 'http',
+        host: 'https://demo.example.com:9443/path',
+        port: 8000,
+      );
+      expect(rawSettings.baseUrl, 'http://demo.example.com:9443');
+      expect(rawSettings.isValid, isTrue);
 
-    final settings = ConnectionSettings.sanitized(
-      scheme: 'http',
-      host: 'https://demo.example.com:9443/path',
-      port: 8000,
-    );
+      final settings = ConnectionSettings.sanitized(
+        scheme: 'http',
+        host: 'https://demo.example.com:9443/path',
+        port: 8000,
+      );
 
-    expect(settings.host, 'demo.example.com');
-    expect(settings.port, 9443);
-    expect(settings.baseUrl, 'http://demo.example.com:9443');
+      expect(settings.host, 'demo.example.com');
+      expect(settings.port, 9443);
+      expect(settings.baseUrl, 'http://demo.example.com:9443');
 
-    const fallbackPortSettings = ConnectionSettings(
-      scheme: 'https',
-      host: 'demo.example.com:abc',
-      port: 8443,
-    );
-    expect(fallbackPortSettings.baseUrl, 'https://demo.example.com:8443');
-  });
+      const fallbackPortSettings = ConnectionSettings(
+        scheme: 'https',
+        host: 'demo.example.com:abc',
+        port: 8443,
+      );
+      expect(fallbackPortSettings.baseUrl, 'https://demo.example.com:8443');
+    },
+  );
 
   test(
     'initialize keeps cached auth-required state out of manual sign-in status when session is still active',
@@ -76,11 +83,11 @@ void main() {
         windowStart: DateTime.utc(2026, 4, 20),
         windowEnd: DateTime.utc(2026, 4, 26),
         lastSuccessfulSyncAt: DateTime.now().toUtc().subtract(
-          const Duration(minutes: 20),
-        ),
+              const Duration(minutes: 20),
+            ),
         lastAttemptAt: DateTime.now().toUtc().subtract(
-          const Duration(minutes: 2),
-        ),
+              const Duration(minutes: 2),
+            ),
         lastSyncResult: SyncResultStatus.authRequired,
         tasks: const [],
       );
@@ -128,10 +135,7 @@ void main() {
     final controller = AppController(services);
     await controller.initialize();
 
-    expect(
-      controller.preferences.offlineTaskWindow,
-      OfflineTaskWindow.days14,
-    );
+    expect(controller.preferences.offlineTaskWindow, OfflineTaskWindow.days14);
     expect(controller.preferences.autoRefreshOnOpen, isFalse);
     expect(controller.preferences.themeMode, AppThemeMode.dark);
     expect(controller.preferences.showOverdueTasksInTodayView, isFalse);
@@ -175,7 +179,11 @@ void main() {
             title: 'Overdue task',
             bucket: 'overdue',
             dueDate: DateTime.utc(today.year, today.month, today.day - 1),
-            assignmentDate: DateTime.utc(today.year, today.month, today.day - 1),
+            assignmentDate: DateTime.utc(
+              today.year,
+              today.month,
+              today.day - 1,
+            ),
           ),
           _task(
             id: 3,
@@ -191,7 +199,33 @@ void main() {
             title: 'Upcoming task',
             bucket: 'upcoming',
             dueDate: DateTime.utc(today.year, today.month, today.day + 1),
-            assignmentDate: DateTime.utc(today.year, today.month, today.day + 1),
+            assignmentDate: DateTime.utc(
+              today.year,
+              today.month,
+              today.day + 1,
+            ),
+          ),
+          _task(
+            id: 5,
+            title: 'Completed due today assigned earlier',
+            bucket: 'completed',
+            dueDate: DateTime.utc(today.year, today.month, today.day),
+            assignmentDate: DateTime.utc(
+              today.year,
+              today.month,
+              today.day - 3,
+            ),
+            status: MobileTaskStatus.completed,
+            isCompleted: true,
+          ),
+          _task(
+            id: 6,
+            title: 'Completed due today without assignment',
+            bucket: 'completed',
+            dueDate: DateTime.utc(today.year, today.month, today.day),
+            assignmentDate: null,
+            status: MobileTaskStatus.completed,
+            isCompleted: true,
           ),
         ],
       );
@@ -265,23 +299,82 @@ void main() {
     expect(AppPreferences.defaults().showOverdueTasksInTodayView, isTrue);
   });
 
-  test(
-    'show overdue setting persists after controller restart',
-    () async {
-      final services = _buildServices();
+  test('show overdue setting persists after controller restart', () async {
+    final services = _buildServices();
 
-      final firstController = AppController(services);
-      await firstController.initialize();
-      await firstController.setShowOverdueTasksInTodayView(false);
-      firstController.dispose();
+    final firstController = AppController(services);
+    await firstController.initialize();
+    await firstController.setShowOverdueTasksInTodayView(false);
+    firstController.dispose();
 
-      final secondController = AppController(services);
-      await secondController.initialize();
+    final secondController = AppController(services);
+    await secondController.initialize();
 
-      expect(secondController.preferences.showOverdueTasksInTodayView, isFalse);
-      secondController.dispose();
-    },
-  );
+    expect(secondController.preferences.showOverdueTasksInTodayView, isFalse);
+    secondController.dispose();
+  });
+
+  test('offline status changes update cache and persist pending sync',
+      () async {
+    final services = _buildServices(httpClient: _OfflineClient());
+    const settings = ConnectionSettings(
+      scheme: 'https',
+      host: 'example.com',
+      port: 443,
+    );
+    const savedLogin = SavedLogin(
+      email: 'user@example.com',
+      password: 'secret-pass',
+    );
+    final today = DateTime.now().toUtc();
+    final snapshot = TaskCacheSnapshot(
+      serverBaseUrl: settings.baseUrl,
+      userEmail: savedLogin.email,
+      windowStart: DateTime.utc(today.year, today.month, today.day),
+      windowEnd: DateTime.utc(today.year, today.month, today.day + 3),
+      lastSuccessfulSyncAt: today.subtract(const Duration(minutes: 10)),
+      lastAttemptAt: today.subtract(const Duration(minutes: 1)),
+      lastSyncResult: SyncResultStatus.success,
+      tasks: [
+        _task(
+          id: 1,
+          title: 'Today task',
+          bucket: 'today',
+          dueDate: DateTime.utc(today.year, today.month, today.day),
+          assignmentDate: DateTime.utc(today.year, today.month, today.day),
+        ),
+      ],
+    );
+
+    await services.connectionRepository.save(settings);
+    await services.savedLoginRepository.save(savedLogin);
+    await services.taskCacheRepository.save(snapshot);
+
+    final controller = AppController(services);
+    await controller.initialize();
+
+    final updated = await controller.updateTaskStatus(
+      taskId: 1,
+      status: MobileTaskStatus.completed,
+    );
+
+    expect(updated, isTrue);
+    expect(controller.hasPendingStatusUpdate(1), isTrue);
+    expect(controller.taskById(1)?.status, MobileTaskStatus.completed);
+    expect(controller.completedTodayTasks.map((task) => task.id), [1]);
+    expect(controller.cacheSnapshot?.lastSuccessfulSyncAt,
+        snapshot.lastSuccessfulSyncAt);
+    expect(controller.cacheSnapshot?.lastSyncResult, SyncResultStatus.success);
+
+    final pending = await services.pendingStatusUpdateRepository.load(
+      serverBaseUrl: settings.baseUrl,
+      userEmail: savedLogin.email,
+    );
+    expect(pending, hasLength(1));
+    expect(pending.single.taskId, 1);
+    expect(pending.single.status, MobileTaskStatus.completed);
+    controller.dispose();
+  });
 }
 
 AuthSession _buildSession() {
@@ -305,7 +398,7 @@ MobileTask _task({
   required String title,
   required String bucket,
   required DateTime dueDate,
-  required DateTime assignmentDate,
+  required DateTime? assignmentDate,
   MobileTaskStatus status = MobileTaskStatus.pending,
   bool isCompleted = false,
 }) {
@@ -329,7 +422,7 @@ MobileTask _task({
   );
 }
 
-AppServices _buildServices() {
+AppServices _buildServices({http.Client? httpClient}) {
   final localStore = InMemoryLocalStore();
   final secureStore = InMemorySecureStore();
 
@@ -341,8 +434,16 @@ AppServices _buildServices() {
     savedLoginRepository: SavedLoginRepository(secureStore),
     sessionRepository: SessionRepository(secureStore),
     preferencesRepository: PreferencesRepository(localStore),
+    pendingStatusUpdateRepository: PendingStatusUpdateRepository(localStore),
     taskCacheRepository: TaskCacheRepository(localStore),
     widgetStateRepository: WidgetStateRepository(localStore),
-    httpClient: http.Client(),
+    httpClient: httpClient ?? http.Client(),
   );
+}
+
+class _OfflineClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    throw const SocketException('offline');
+  }
 }

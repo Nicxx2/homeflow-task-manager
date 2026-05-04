@@ -4,9 +4,11 @@ import 'package:homeflow_mobile/src/application/app_controller.dart';
 import 'package:homeflow_mobile/src/application/app_services.dart';
 import 'package:homeflow_mobile/src/core/date_display.dart';
 import 'package:homeflow_mobile/src/core/models/app_preferences.dart';
+import 'package:homeflow_mobile/src/core/models/date_codec.dart';
 import 'package:homeflow_mobile/src/core/models/mobile_task.dart';
 import 'package:homeflow_mobile/src/core/models/saved_login.dart';
 import 'package:homeflow_mobile/src/data/repositories/connection_repository.dart';
+import 'package:homeflow_mobile/src/data/repositories/pending_status_update_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/preferences_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/saved_login_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/session_repository.dart';
@@ -65,6 +67,12 @@ void main() {
     expect(formatWeekdayLabelLower(value), 'monday');
   });
 
+  test('date-only payloads keep locally selected calendar day', () {
+    final selected = DateTime(2026, 5, 3);
+
+    expect(formatDateOnly(selected), '2026-05-03');
+  });
+
   testWidgets('today tab shows overdue section only when overdue tasks exist', (
     tester,
   ) async {
@@ -118,7 +126,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('today tab hides overdue section when there are no overdue tasks', (
+  testWidgets('today tab hides overdue section when there are no overdue tasks',
+      (
     tester,
   ) async {
     final controller = _FakeAppController(
@@ -245,10 +254,10 @@ class _FakeAppController extends AppController {
     required List<MobileTask> active,
     required List<MobileTask> overdue,
     required List<MobileTask> completed,
-  }) : _preferences = preferences,
-       _active = active,
-       _overdue = overdue,
-       _completed = completed;
+  })  : _preferences = preferences,
+        _active = active,
+        _overdue = overdue,
+        _completed = completed;
 
   final AppPreferences _preferences;
   final List<MobileTask> _active;
@@ -268,7 +277,8 @@ class _FakeAppController extends AppController {
   List<MobileTask> get completedTodayTasks => _completed;
 
   @override
-  String messageForDay(DateTime day) => 'No tasks for this day in the current cache window.';
+  String messageForDay(DateTime day) =>
+      'No tasks for this day in the current cache window.';
 }
 
 AppServices _buildServices() {
@@ -283,6 +293,7 @@ AppServices _buildServices() {
     savedLoginRepository: SavedLoginRepository(secureStore),
     sessionRepository: SessionRepository(secureStore),
     preferencesRepository: PreferencesRepository(localStore),
+    pendingStatusUpdateRepository: PendingStatusUpdateRepository(localStore),
     taskCacheRepository: TaskCacheRepository(localStore),
     widgetStateRepository: WidgetStateRepository(localStore),
     httpClient: http.Client(),

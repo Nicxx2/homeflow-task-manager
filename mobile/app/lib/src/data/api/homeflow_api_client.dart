@@ -7,6 +7,9 @@ import 'package:http/http.dart' as http;
 import '../../core/models/auth_session.dart';
 import '../../core/models/mobile_task.dart';
 import '../../core/models/remote_task_window.dart';
+import '../../core/models/task_next_available_result.dart';
+import '../../core/models/task_schedule_feedback.dart';
+import '../../core/models/task_schedule_update_result.dart';
 import '../../core/models/task_status_update_result.dart';
 import 'api_exception.dart';
 
@@ -14,8 +17,8 @@ class HomeflowApiClient {
   static const Duration _requestTimeout = Duration(seconds: 15);
 
   HomeflowApiClient({required String baseUrl, required http.Client httpClient})
-    : _baseUri = Uri.parse(baseUrl),
-      _httpClient = httpClient;
+      : _baseUri = Uri.parse(baseUrl),
+        _httpClient = httpClient;
 
   final Uri _baseUri;
   final http.Client _httpClient;
@@ -73,6 +76,55 @@ class HomeflowApiClient {
       refreshRequired: refreshRequired,
       task: MobileTask.fromJson(task),
     );
+  }
+
+  Future<TaskScheduleFeedback> checkTaskSchedule({
+    required String accessToken,
+    required int taskId,
+    required DateTime assignmentDate,
+  }) async {
+    final payload = await _getJson(
+      '/api/v1/mobile/tasks/$taskId/schedule/check',
+      queryParameters: <String, String>{
+        'assignment_date': _formatDate(assignmentDate),
+      },
+      accessToken: accessToken,
+    );
+    return TaskScheduleFeedback.fromJson(payload);
+  }
+
+  Future<TaskNextAvailableResult> fetchTaskNextAvailableDate({
+    required String accessToken,
+    required int taskId,
+    DateTime? startDate,
+  }) async {
+    final payload = await _getJson(
+      '/api/v1/mobile/tasks/$taskId/schedule/next-available',
+      queryParameters: <String, String>{
+        if (startDate != null) 'start_date': _formatDate(startDate),
+      },
+      accessToken: accessToken,
+    );
+    return TaskNextAvailableResult.fromJson(payload);
+  }
+
+  Future<TaskScheduleUpdateResult> updateTaskSchedule({
+    required String accessToken,
+    required int taskId,
+    required DateTime dueDate,
+    required DateTime assignmentDate,
+    bool extendCapacity = false,
+  }) async {
+    final payload = await _patchJson(
+      '/api/v1/mobile/tasks/$taskId/schedule',
+      accessToken: accessToken,
+      body: <String, dynamic>{
+        'due_date': _formatDate(dueDate),
+        'assignment_date': _formatDate(assignmentDate),
+        'extend_capacity': extendCapacity,
+      },
+    );
+    return TaskScheduleUpdateResult.fromJson(payload);
   }
 
   Future<Map<String, dynamic>> _getJson(
@@ -163,9 +215,8 @@ class HomeflowApiClient {
   }
 
   Map<String, dynamic> _decodeJson(http.Response response) {
-    final dynamic decoded = response.body.isEmpty
-        ? <String, dynamic>{}
-        : jsonDecode(response.body);
+    final dynamic decoded =
+        response.body.isEmpty ? <String, dynamic>{} : jsonDecode(response.body);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (decoded is Map<String, dynamic>) {
         return decoded;
@@ -176,9 +227,8 @@ class HomeflowApiClient {
       );
     }
 
-    final payload = decoded is Map<String, dynamic>
-        ? decoded
-        : <String, dynamic>{};
+    final payload =
+        decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     final code = payload['code'] as String?;
     final detail = payload['detail'] as String? ?? 'Server request failed.';
     throw ApiException(
@@ -223,9 +273,8 @@ class HomeflowApiClient {
   }
 
   String _formatDate(DateTime value) {
-    final normalized = value.toUtc();
-    final month = normalized.month.toString().padLeft(2, '0');
-    final day = normalized.day.toString().padLeft(2, '0');
-    return '${normalized.year}-$month-$day';
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day';
   }
 }

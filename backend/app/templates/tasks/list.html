@@ -93,7 +93,7 @@
 {% set card_state_class = "app-surface" %}
 {% if task.status.value == "completed" and task.recurrence_parent_id %}
   {% set card_state_class = "app-surface" %}
-{% elif task.due_date < today and task.status.value != "completed" %}
+{% elif task.status.value != "completed" and (task.due_date < today or (task.assignee_id and task.assignment_date and task.assignment_date < today)) %}
   {% set card_state_class = "app-status-overdue" %}
 {% elif task.status.value == "in_progress" %}
   {% set card_state_class = "app-status-progress" %}

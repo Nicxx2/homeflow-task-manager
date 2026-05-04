@@ -102,9 +102,8 @@ class MobileTask {
       'description': description,
       'status': status.value,
       'due_date': formatDateOnly(dueDate),
-      'assignment_date': assignmentDate == null
-          ? null
-          : formatDateOnly(assignmentDate!),
+      'assignment_date':
+          assignmentDate == null ? null : formatDateOnly(assignmentDate!),
       'assignee_id': assigneeId,
       'effort_level': effortLevel.value,
       'points_value': pointsValue,
@@ -116,5 +115,35 @@ class MobileTask {
       'recurrence_parent_id': recurrenceParentId,
       'recurrence_summary': recurrenceSummary,
     };
+  }
+
+  MobileTask copyWith({
+    MobileTaskStatus? status,
+    DateTime? dueDate,
+    DateTime? assignmentDate,
+    DateTime? updatedAt,
+    bool? isOverdue,
+    bool? isCompleted,
+    String? displayBucket,
+    String? sortKey,
+  }) {
+    return MobileTask(
+      id: id,
+      title: title,
+      description: description,
+      status: status ?? this.status,
+      dueDate: dueDate ?? this.dueDate,
+      assignmentDate: assignmentDate ?? this.assignmentDate,
+      assigneeId: assigneeId,
+      effortLevel: effortLevel,
+      pointsValue: pointsValue,
+      updatedAt: updatedAt ?? this.updatedAt,
+      isOverdue: isOverdue ?? this.isOverdue,
+      isCompleted: isCompleted ?? this.isCompleted,
+      displayBucket: displayBucket ?? this.displayBucket,
+      sortKey: sortKey ?? this.sortKey,
+      recurrenceParentId: recurrenceParentId,
+      recurrenceSummary: recurrenceSummary,
+    );
   }
 }

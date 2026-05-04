@@ -6,8 +6,11 @@ import '../core/models/app_preferences.dart';
 import '../core/models/auth_session.dart';
 import '../core/models/connection_settings.dart';
 import '../core/models/mobile_task.dart';
+import '../core/models/pending_status_update.dart';
 import '../core/models/saved_login.dart';
 import '../core/models/task_cache_snapshot.dart';
+import '../core/models/task_next_available_result.dart';
+import '../core/models/task_schedule_feedback.dart';
 import '../core/models/today_widget_snapshot.dart';
 import '../data/api/api_exception.dart';
 import '../data/api/homeflow_api_client.dart';
@@ -42,6 +45,8 @@ class AppController extends ChangeNotifier {
   bool _isSyncing = false;
   int _selectedTabIndex = 0;
   final Set<int> _updatingTaskIds = <int>{};
+  final Map<int, PendingStatusUpdate> _pendingStatusUpdates =
+      <int, PendingStatusUpdate>{};
 
   AppPreferences get preferences => _preferences;
   ConnectionSettings? get connectionSettings => _connectionSettings;
@@ -71,7 +76,8 @@ class AppController extends ChangeNotifier {
 
   bool get hasSavedLogin => _savedLogin != null;
 
-  bool get hasActiveSession => _session != null && !(_session?.isExpired ?? true);
+  bool get hasActiveSession =>
+      _session != null && !(_session?.isExpired ?? true);
 
   bool get isShowingCachedData {
     final result =
@@ -100,6 +106,17 @@ class AppController extends ChangeNotifier {
       return false;
     }
     return _session != null || hasCachedTasks;
+  }
+
+  bool get canChangeTaskSchedule {
+    final snapshot = _cacheSnapshot;
+    if (_connectionSettings == null || snapshot == null) {
+      return false;
+    }
+    if (snapshot.lastSyncResult != SyncResultStatus.success) {
+      return false;
+    }
+    return hasActiveSession;
   }
 
   bool get isDataStale {
@@ -137,8 +154,9 @@ class AppController extends ChangeNotifier {
       if (task.displayBucket != 'completed') {
         return false;
       }
-      final assignment = _dateOnly(task.assignmentDate ?? task.dueDate);
-      return assignment.isAtSameMomentAs(today);
+      final assignmentDate = task.assignmentDate;
+      return assignmentDate != null &&
+          _dateOnly(assignmentDate).isAtSameMomentAs(today);
     }).toList(growable: false);
   }
 
@@ -239,6 +257,9 @@ class AppController extends ChangeNotifier {
   }
 
   bool isUpdatingTask(int taskId) => _updatingTaskIds.contains(taskId);
+
+  bool hasPendingStatusUpdate(int taskId) =>
+      _pendingStatusUpdates.containsKey(taskId);
 
   String get syncStatusMessage {
     if (needsReauth) {
@@ -358,6 +379,17 @@ class AppController extends ChangeNotifier {
     }
     final session = await _ensureActiveSession();
     if (session == null) {
+      if (hasSavedLogin) {
+        final queued = await _queueTaskStatusUpdate(
+          taskId: taskId,
+          status: status,
+        );
+        if (queued) {
+          _errorMessage = 'Status will sync when connected.';
+        }
+        notifyListeners();
+        return queued;
+      }
       _errorMessage = needsReauth
           ? 'Sign in again before changing task status.'
           : 'Task status changes are unavailable right now.';
@@ -404,6 +436,129 @@ class AppController extends ChangeNotifier {
       notifyListeners();
       return true;
     } on ApiException catch (error) {
+      if (_isOfflineWriteError(error)) {
+        final queued = await _queueTaskStatusUpdate(
+          taskId: taskId,
+          status: status,
+        );
+        if (queued) {
+          _errorMessage = 'Status will sync when connected.';
+        }
+        notifyListeners();
+        return queued;
+      }
+      _errorMessage = error.message;
+      notifyListeners();
+      return false;
+    } finally {
+      _updatingTaskIds.remove(taskId);
+      notifyListeners();
+    }
+  }
+
+  Future<TaskScheduleFeedback?> checkTaskSchedule({
+    required int taskId,
+    required DateTime assignmentDate,
+  }) async {
+    final settings = _connectionSettings;
+    if (settings == null) {
+      return null;
+    }
+    final session = await _ensureActiveSession();
+    if (session == null) {
+      _errorMessage = 'Sign in again before changing task dates.';
+      notifyListeners();
+      return null;
+    }
+
+    final client = HomeflowApiClient(
+      baseUrl: settings.baseUrl,
+      httpClient: _services.httpClient,
+    );
+    try {
+      return await client.checkTaskSchedule(
+        accessToken: session.accessToken,
+        taskId: taskId,
+        assignmentDate: assignmentDate,
+      );
+    } on ApiException catch (error) {
+      _errorMessage = error.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<TaskNextAvailableResult?> fetchNextAvailableAssignmentDate({
+    required int taskId,
+    DateTime? startDate,
+  }) async {
+    final settings = _connectionSettings;
+    if (settings == null) {
+      return null;
+    }
+    final session = await _ensureActiveSession();
+    if (session == null) {
+      _errorMessage = 'Sign in again before changing task dates.';
+      notifyListeners();
+      return null;
+    }
+
+    final client = HomeflowApiClient(
+      baseUrl: settings.baseUrl,
+      httpClient: _services.httpClient,
+    );
+    try {
+      return await client.fetchTaskNextAvailableDate(
+        accessToken: session.accessToken,
+        taskId: taskId,
+        startDate: startDate,
+      );
+    } on ApiException catch (error) {
+      _errorMessage = error.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> updateTaskSchedule({
+    required int taskId,
+    required DateTime dueDate,
+    required DateTime assignmentDate,
+    bool extendCapacity = false,
+  }) async {
+    final settings = _connectionSettings;
+    final snapshot = _cacheSnapshot;
+    if (settings == null || snapshot == null) {
+      return false;
+    }
+    final session = await _ensureActiveSession();
+    if (session == null) {
+      _errorMessage = 'Sign in again before changing task dates.';
+      notifyListeners();
+      return false;
+    }
+
+    _updatingTaskIds.add(taskId);
+    _clearError();
+    notifyListeners();
+
+    final client = HomeflowApiClient(
+      baseUrl: settings.baseUrl,
+      httpClient: _services.httpClient,
+    );
+
+    try {
+      final result = await client.updateTaskSchedule(
+        accessToken: session.accessToken,
+        taskId: taskId,
+        dueDate: dueDate,
+        assignmentDate: assignmentDate,
+        extendCapacity: extendCapacity,
+      );
+      await _replaceTaskInCache(result.task);
+      await refreshTasks();
+      return true;
+    } on ApiException catch (error) {
       _errorMessage = error.message;
       notifyListeners();
       return false;
@@ -425,11 +580,15 @@ class AppController extends ChangeNotifier {
       _session = await _services.sessionRepository.load();
 
       final settings = _connectionSettings;
-      final session = _session;
-      if (settings != null && session != null) {
+      final userEmail = _pendingQueueUserEmail();
+      if (settings != null && userEmail != null) {
         _cacheSnapshot = await _services.taskCacheRepository.load(
           serverBaseUrl: settings.baseUrl,
-          userEmail: session.user.email,
+          userEmail: userEmail,
+        );
+        await _loadPendingStatusUpdates(
+          serverBaseUrl: settings.baseUrl,
+          userEmail: userEmail,
         );
       }
 
@@ -527,6 +686,10 @@ class AppController extends ChangeNotifier {
         serverBaseUrl: settings.baseUrl,
         userEmail: session.user.email,
       );
+      await _loadPendingStatusUpdates(
+        serverBaseUrl: settings.baseUrl,
+        userEmail: session.user.email,
+      );
       _selectedTabIndex = 0;
       await refreshTasks();
       return true;
@@ -556,6 +719,18 @@ class AppController extends ChangeNotifier {
     _isSyncing = true;
     _clearError();
     notifyListeners();
+
+    final pendingSynced = await _syncPendingStatusUpdates(
+      settings: settings,
+      session: session,
+    );
+    if (!pendingSynced) {
+      _isSyncing = false;
+      await _persistWidgetSnapshot();
+      await _syncScheduledTaskReminders();
+      notifyListeners();
+      return;
+    }
 
     final previous = await _services.taskCacheRepository.load(
       serverBaseUrl: settings.baseUrl,
@@ -601,7 +776,8 @@ class AppController extends ChangeNotifier {
 
     final restoredSession = await _ensureActiveSession(
       allowCachedSession: true,
-      forceRefresh: _cacheSnapshot?.lastSyncResult == SyncResultStatus.authRequired,
+      forceRefresh:
+          _cacheSnapshot?.lastSyncResult == SyncResultStatus.authRequired,
     );
 
     if (_preferences.autoRefreshOnOpen && restoredSession != null) {
@@ -685,14 +861,19 @@ class AppController extends ChangeNotifier {
 
   Future<void> clearCachedData() async {
     final settings = _connectionSettings;
-    final session = _session;
-    if (settings != null && session != null) {
+    final userEmail = _pendingQueueUserEmail();
+    if (settings != null && userEmail != null) {
       await _services.taskCacheRepository.clear(
         serverBaseUrl: settings.baseUrl,
-        userEmail: session.user.email,
+        userEmail: userEmail,
+      );
+      await _services.pendingStatusUpdateRepository.clear(
+        serverBaseUrl: settings.baseUrl,
+        userEmail: userEmail,
       );
     }
     _cacheSnapshot = null;
+    _pendingStatusUpdates.clear();
     await _persistWidgetSnapshot();
     await _syncScheduledTaskReminders();
     notifyListeners();
@@ -700,11 +881,15 @@ class AppController extends ChangeNotifier {
 
   Future<void> logout() async {
     final settings = _connectionSettings;
-    final session = _session;
-    if (settings != null && session != null) {
+    final userEmail = _pendingQueueUserEmail();
+    if (settings != null && userEmail != null) {
       await _services.taskCacheRepository.clear(
         serverBaseUrl: settings.baseUrl,
-        userEmail: session.user.email,
+        userEmail: userEmail,
+      );
+      await _services.pendingStatusUpdateRepository.clear(
+        serverBaseUrl: settings.baseUrl,
+        userEmail: userEmail,
       );
     }
     await _services.sessionRepository.clear();
@@ -712,6 +897,7 @@ class AppController extends ChangeNotifier {
     _savedLogin = null;
     _session = null;
     _cacheSnapshot = null;
+    _pendingStatusUpdates.clear();
     _selectedTabIndex = 0;
     _clearError();
     await _persistWidgetSnapshot();
@@ -733,7 +919,8 @@ class AppController extends ChangeNotifier {
       return currentSession;
     }
 
-    final savedLogin = _savedLogin ?? await _services.savedLoginRepository.load();
+    final savedLogin =
+        _savedLogin ?? await _services.savedLoginRepository.load();
     _savedLogin = savedLogin;
     if (savedLogin == null) {
       if (!allowCachedSession) {
@@ -798,13 +985,221 @@ class AppController extends ChangeNotifier {
   }
 
   DateTime _todayUtc() {
-    final now = DateTime.now().toUtc();
+    final now = DateTime.now();
     return DateTime.utc(now.year, now.month, now.day);
   }
 
   DateTime _dateOnly(DateTime value) {
-    final utc = value.toUtc();
-    return DateTime.utc(utc.year, utc.month, utc.day);
+    return DateTime.utc(value.year, value.month, value.day);
+  }
+
+  Future<void> _loadPendingStatusUpdates({
+    required String serverBaseUrl,
+    required String userEmail,
+  }) async {
+    final updates = await _services.pendingStatusUpdateRepository.load(
+      serverBaseUrl: serverBaseUrl,
+      userEmail: userEmail,
+    );
+    _pendingStatusUpdates
+      ..clear()
+      ..addEntries(updates.map((update) => MapEntry(update.taskId, update)));
+  }
+
+  Future<void> _savePendingStatusUpdates() async {
+    final settings = _connectionSettings;
+    final userEmail = _pendingQueueUserEmail();
+    if (settings == null || userEmail == null) {
+      return;
+    }
+    await _services.pendingStatusUpdateRepository.save(
+      serverBaseUrl: settings.baseUrl,
+      userEmail: userEmail,
+      updates: _pendingStatusUpdates.values.toList(growable: false),
+    );
+  }
+
+  Future<bool> _queueTaskStatusUpdate({
+    required int taskId,
+    required MobileTaskStatus status,
+  }) async {
+    final task = taskById(taskId);
+    if (task == null) {
+      _errorMessage = 'Task is no longer available in the offline cache.';
+      return false;
+    }
+    final update = PendingStatusUpdate(
+      taskId: taskId,
+      status: status,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    _pendingStatusUpdates[taskId] = update;
+    await _savePendingStatusUpdates();
+    await _replaceTaskInCache(_applyStatusToTask(task, status),
+        markSynced: false);
+    return true;
+  }
+
+  Future<bool> _syncPendingStatusUpdates({
+    required ConnectionSettings settings,
+    required AuthSession session,
+  }) async {
+    if (_pendingStatusUpdates.isEmpty) {
+      return true;
+    }
+    final client = HomeflowApiClient(
+      baseUrl: settings.baseUrl,
+      httpClient: _services.httpClient,
+    );
+    final remaining = Map<int, PendingStatusUpdate>.from(_pendingStatusUpdates);
+    for (final update in _pendingStatusUpdates.values.toList()
+      ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt))) {
+      try {
+        final result = await client.updateTaskStatus(
+          accessToken: session.accessToken,
+          taskId: update.taskId,
+          status: update.status,
+        );
+        remaining.remove(update.taskId);
+        if (result.refreshRequired) {
+          continue;
+        }
+        if (result.task != null) {
+          await _replaceTaskInCache(result.task!);
+        }
+      } on ApiException catch (error) {
+        if (_isOfflineWriteError(error)) {
+          _pendingStatusUpdates
+            ..clear()
+            ..addAll(remaining);
+          await _savePendingStatusUpdates();
+          _errorMessage = 'Status changes will sync when connected.';
+          return false;
+        }
+        remaining.remove(update.taskId);
+        _errorMessage = error.type == ApiErrorType.notFound
+            ? 'A pending status change was skipped because the task changed.'
+            : error.message;
+      }
+    }
+    _pendingStatusUpdates
+      ..clear()
+      ..addAll(remaining);
+    await _savePendingStatusUpdates();
+    return true;
+  }
+
+  MobileTask _applyStatusToTask(MobileTask task, MobileTaskStatus status) {
+    final today = _todayUtc();
+    final isCompleted = status == MobileTaskStatus.completed;
+    final isOverdue = !isCompleted &&
+        ((task.assignmentDate != null &&
+                _dateOnly(task.assignmentDate!).isBefore(today)) ||
+            _dateOnly(task.dueDate).isBefore(today));
+    return task.copyWith(
+      status: status,
+      isCompleted: isCompleted,
+      isOverdue: isOverdue,
+      displayBucket: _displayBucketForTask(task, status: status),
+      sortKey: _sortKeyForTask(task, status: status),
+      updatedAt: DateTime.now().toUtc(),
+    );
+  }
+
+  String _displayBucketForTask(MobileTask task,
+      {required MobileTaskStatus status}) {
+    final today = _todayUtc();
+    final assignment = _dateOnly(task.assignmentDate ?? task.dueDate);
+    if (status == MobileTaskStatus.completed) {
+      return 'completed';
+    }
+    if (assignment.isAtSameMomentAs(today)) {
+      return 'today';
+    }
+    if (assignment.isBefore(today) || _dateOnly(task.dueDate).isBefore(today)) {
+      return 'overdue';
+    }
+    return 'upcoming';
+  }
+
+  String _sortKeyForTask(MobileTask task, {required MobileTaskStatus status}) {
+    final bucket = _displayBucketForTask(task, status: status);
+    final statusOrder = switch (status) {
+      MobileTaskStatus.inProgress => '00',
+      MobileTaskStatus.pending => '10',
+      MobileTaskStatus.completed => '20',
+    };
+    final bucketOrder = switch (bucket) {
+      'overdue' => '00',
+      'today' => '10',
+      'upcoming' => '20',
+      'completed' => '30',
+      _ => '99',
+    };
+    final primaryDate = task.assignmentDate ?? task.dueDate;
+    return [
+      bucketOrder,
+      statusOrder,
+      _formatDateOnly(primaryDate),
+      _formatDateOnly(task.dueDate),
+      task.updatedAt.toIso8601String(),
+      task.id.toString().padLeft(10, '0'),
+    ].join(':');
+  }
+
+  bool _isOfflineWriteError(ApiException error) {
+    return error.type == ApiErrorType.networkUnavailable ||
+        error.type == ApiErrorType.serverUnreachable;
+  }
+
+  String? _pendingQueueUserEmail() {
+    return _session?.user.email ?? _savedLogin?.email;
+  }
+
+  Future<void> _replaceTaskInCache(
+    MobileTask updatedTask, {
+    bool markSynced = true,
+  }) async {
+    final snapshot = _cacheSnapshot;
+    if (snapshot == null) {
+      return;
+    }
+
+    final nextTasks = snapshot.tasks
+        .where((task) => task.id != updatedTask.id)
+        .toList(growable: true);
+    if (_taskBelongsInSnapshot(updatedTask, snapshot)) {
+      nextTasks.add(updatedTask);
+    }
+    nextTasks.sort((a, b) => a.sortKey.compareTo(b.sortKey));
+
+    final updatedSnapshot = snapshot.copyWith(
+      lastAttemptAt: DateTime.now().toUtc(),
+      lastSuccessfulSyncAt:
+          markSynced ? DateTime.now().toUtc() : snapshot.lastSuccessfulSyncAt,
+      lastSyncResult:
+          markSynced ? SyncResultStatus.success : snapshot.lastSyncResult,
+      tasks: nextTasks,
+    );
+    _cacheSnapshot = updatedSnapshot;
+    await _services.taskCacheRepository.save(updatedSnapshot);
+    await _persistWidgetSnapshot();
+    await _syncScheduledTaskReminders();
+    notifyListeners();
+  }
+
+  bool _taskBelongsInSnapshot(MobileTask task, TaskCacheSnapshot snapshot) {
+    final assignmentDate = task.assignmentDate;
+    if (assignmentDate == null) {
+      return false;
+    }
+    final assignment = _dateOnly(assignmentDate);
+    final today = _todayUtc();
+    final isActiveOverdue = !task.isCompleted &&
+        (assignment.isBefore(today) || _dateOnly(task.dueDate).isBefore(today));
+    return isActiveOverdue ||
+        !assignment.isBefore(snapshot.windowStart) &&
+            !assignment.isAfter(snapshot.windowEnd);
   }
 
   String _formatTimestamp(DateTime value) {
@@ -814,6 +1209,12 @@ class AppController extends ChangeNotifier {
     final hour = local.hour.toString().padLeft(2, '0');
     final minute = local.minute.toString().padLeft(2, '0');
     return '$month/$day ${local.year} $hour:$minute';
+  }
+
+  String _formatDateOnly(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day';
   }
 
   Future<void> _persistWidgetSnapshot() async {
@@ -982,10 +1383,7 @@ class AppController extends ChangeNotifier {
     return '$hour:$minute';
   }
 
-  String _buildInitializationDiagnostics(
-    Object error,
-    StackTrace stackTrace,
-  ) {
+  String _buildInitializationDiagnostics(Object error, StackTrace stackTrace) {
     return [
       'Homeflow Mobile startup diagnostics',
       'stage: controller_initialize',

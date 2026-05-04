@@ -113,6 +113,9 @@ V1 views should be based on:
 V1 writes should be limited to:
 
 - update task status
+- update due date while online
+- update the signed-in user's assignment date while online
+- explicitly extend the signed-in user's capacity for a selected assignment day when the backend allows it
 
 ## Screen Spec
 
@@ -161,16 +164,20 @@ Purpose:
 Content:
 
 - today's assigned tasks
+- overdue tasks when they are enabled for the mobile view
 - visible sync status
 - last successful sync time
 
 Behavior:
 
 - actionable tasks first
+- tasks assigned today stay in Today even if their due date is already past, with an overdue indicator
 - completed tasks visible in a lower-priority section or after active items
+- completed tasks are shown for today's assignment date, not because the due date is today
 - pull to refresh
 - tap into task detail
 - fast status changes without leaving the screen where reasonable
+- quick date adjustment while connected to the server
 - if a cached auth failure can be recovered silently, avoid showing a manual sign-in prompt prematurely
 
 ### Upcoming
@@ -212,6 +219,10 @@ Actions:
 - set pending
 - set in progress
 - set completed
+- adjust due date while online
+- adjust assignment date while online
+- use next available assignment date when the chosen date is blocked
+- extend capacity for the signed-in user when deliberately adding extra work
 
 ### Settings / Sync
 
@@ -285,6 +296,7 @@ The sync coordinator should:
 - build the active cache window from settings
 - request the full window from the server
 - replace or merge cached task rows deterministically
+- push pending offline status changes before refreshing where possible
 - keep the previous cache on failed refresh
 - expose sync state to both screens and widget code
 - allow session restoration before surfacing a hard auth-required state when saved login is available
@@ -294,6 +306,7 @@ The app should not:
 - clear valid cache just because one refresh failed
 - show stale data without a label
 - fabricate empty future days
+- queue schedule or capacity changes while offline, because those require live backend validation
 - cancel reminder scheduling only because the active in-memory session object was lost while valid cache still exists
 
 ## Ordering Rules
@@ -302,9 +315,9 @@ The mobile app should define explicit task ordering so "today" feels stable and 
 
 Recommended order:
 
-1. overdue active tasks relevant to today
-2. today's in-progress tasks
-3. today's pending tasks
+1. today's in-progress tasks, including tasks assigned today with a past due date
+2. today's pending tasks, including tasks assigned today with a past due date
+3. overdue tasks from earlier assignment dates, when shown in the mobile view
 4. today's completed tasks
 
 Within each bucket:
@@ -315,6 +328,13 @@ Within each bucket:
 
 The backend should ideally provide a stable sort order or enough fields for the client to reproduce it consistently.
 
+Date rules:
+
+- due dates may be today, future, or past
+- assignment dates may only be today or future
+- capacity checks apply to assignment-date changes
+- completed items belong to the assignment date, not the due date
+
 ## Backend Requirements Before Mobile UI Can Be Considered Correct
 
 The mobile app should not be built around the current generic task routes alone.
@@ -324,6 +344,8 @@ Backend work needed first or in parallel:
 - define mobile-oriented read endpoints for today and windowed upcoming tasks
 - ensure returned tasks are scoped to the authenticated user's mobile views
 - add a status-only update endpoint
+- add mobile schedule check and next-available endpoints
+- add a mobile schedule update endpoint for due date, assignment date, and explicit capacity extension
 - add `updated_at` to task responses if missing
 - provide predictable error payloads
 
