@@ -196,7 +196,7 @@ If someone is away or has blocked days
 
 ---
 
-## ✨ What is new in v2.5
+## ✨ What is new in v2.5.1
 
 - Mobile Today is now assignment-date first, so active and completed work reflects what is planned for the signed-in user today.
 - Completed mobile tasks no longer reappear later just because their due date arrives.
