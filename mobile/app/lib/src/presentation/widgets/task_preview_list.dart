@@ -14,6 +14,7 @@ class TaskPreviewList extends StatelessWidget {
     this.isStatusPending,
     this.showAssignmentDate = false,
     this.showDisplayBucketChip = false,
+    this.showMetadata = true,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class TaskPreviewList extends StatelessWidget {
   final bool Function(int taskId)? isStatusPending;
   final bool showAssignmentDate;
   final bool showDisplayBucketChip;
+  final bool showMetadata;
 
   @override
   Widget build(BuildContext context) {
@@ -54,28 +56,30 @@ class TaskPreviewList extends StatelessWidget {
           child: ListTile(
             onTap: onTaskTap == null ? null : () => onTaskTap!(task),
             title: Text(task.title),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                Text(subtitleParts.join(' - ')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    _TaskChip(label: '${task.pointsValue} pts'),
-                    if (task.isOverdue) const _TaskChip(label: 'overdue'),
-                    if (isStatusPending?.call(task.id) ?? false)
-                      const _TaskChip(label: 'pending sync'),
-                    if (showDisplayBucketChip)
-                      _TaskChip(label: task.displayBucket),
-                    if (task.recurrenceSummary != null)
-                      _TaskChip(label: task.recurrenceSummary!),
-                  ],
-                ),
-              ],
-            ),
+            subtitle: showMetadata
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 4),
+                      Text(subtitleParts.join(' - ')),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          _TaskChip(label: '${task.pointsValue} pts'),
+                          if (task.isOverdue) const _TaskChip(label: 'overdue'),
+                          if (isStatusPending?.call(task.id) ?? false)
+                            const _TaskChip(label: 'pending sync'),
+                          if (showDisplayBucketChip)
+                            _TaskChip(label: task.displayBucket),
+                          if (task.recurrenceSummary != null)
+                            _TaskChip(label: task.recurrenceSummary!),
+                        ],
+                      ),
+                    ],
+                  )
+                : null,
             trailing: _TaskActions(
               task: task,
               updating: updating,

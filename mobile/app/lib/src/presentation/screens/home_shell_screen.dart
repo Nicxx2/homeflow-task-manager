@@ -285,6 +285,7 @@ class _UpcomingDayCard extends StatelessWidget {
             tasks: tasks,
             emptyMessage: controller.messageForDay(day),
             showAssignmentDate: true,
+            showMetadata: false,
             isUpdatingTask: controller.isUpdatingTask,
             isStatusPending: controller.hasPendingStatusUpdate,
             onStatusSelected: controller.canChangeTaskStatus

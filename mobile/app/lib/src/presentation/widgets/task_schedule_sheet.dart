@@ -33,6 +33,8 @@ class _TaskScheduleSheet extends StatefulWidget {
 class _TaskScheduleSheetState extends State<_TaskScheduleSheet> {
   late DateTime _dueDate;
   late DateTime _assignmentDate;
+  late DateTime? _originalAssignmentDate;
+  late DateTime _originalDueDate;
   TaskScheduleFeedback? _feedback;
   String? _message;
   bool _checking = false;
@@ -44,11 +46,12 @@ class _TaskScheduleSheetState extends State<_TaskScheduleSheet> {
   @override
   void initState() {
     super.initState();
-    _dueDate = _dateOnly(widget.task.dueDate);
-    final currentAssignment = _dateOnly(widget.task.assignmentDate ?? _today());
-    _assignmentDate =
-        currentAssignment.isBefore(_today()) ? _today() : currentAssignment;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkSchedule());
+    _originalDueDate = _dateOnly(widget.task.dueDate);
+    _originalAssignmentDate = widget.task.assignmentDate == null
+        ? null
+        : _dateOnly(widget.task.assignmentDate!);
+    _dueDate = _originalDueDate;
+    _assignmentDate = _originalAssignmentDate ?? _today();
   }
 
   @override
@@ -223,19 +226,30 @@ class _TaskScheduleSheetState extends State<_TaskScheduleSheet> {
       _userPickedAssignmentDate = true;
       _message = null;
       _extendCapacity = false;
+      if (!_assignmentNeedsValidation()) {
+        _feedback = null;
+      }
     });
-    await _checkSchedule();
+    if (_assignmentNeedsValidation()) {
+      await _checkSchedule();
+    }
   }
 
   void _useDueDate() {
     final today = _today();
+    final nextAssignmentDate = _dueDate.isBefore(today) ? today : _dueDate;
     setState(() {
-      _assignmentDate = _dueDate.isBefore(today) ? today : _dueDate;
+      _assignmentDate = nextAssignmentDate;
       _userPickedAssignmentDate = true;
       _message = _dueDate.isBefore(today) ? 'Moved to today.' : null;
       _extendCapacity = false;
+      if (!_assignmentNeedsValidation()) {
+        _feedback = null;
+      }
     });
-    _checkSchedule();
+    if (_assignmentNeedsValidation()) {
+      _checkSchedule();
+    }
   }
 
   Future<void> _useNextAvailable() async {
@@ -352,14 +366,42 @@ class _TaskScheduleSheetState extends State<_TaskScheduleSheet> {
   }
 
   bool _canSaveSchedule() {
+    if (_checking || !_hasChanges() || _assignmentDate.isBefore(_today())) {
+      return false;
+    }
+    if (!_assignmentNeedsValidation()) {
+      return true;
+    }
     final feedback = _feedback;
-    if (_checking || feedback == null) {
+    if (feedback == null) {
       return false;
     }
     if (feedback.valid) {
       return true;
     }
     return _extendCapacity && _canExtendCapacity(feedback);
+  }
+
+  bool _hasChanges() {
+    return !_isSameDate(_dueDate, _originalDueDate) ||
+        !_isSameNullableDate(_assignmentDate, _originalAssignmentDate);
+  }
+
+  bool _assignmentNeedsValidation() {
+    return !_isSameNullableDate(_assignmentDate, _originalAssignmentDate);
+  }
+
+  bool _isSameNullableDate(DateTime? left, DateTime? right) {
+    if (left == null || right == null) {
+      return left == right;
+    }
+    return _isSameDate(left, right);
+  }
+
+  bool _isSameDate(DateTime left, DateTime right) {
+    return left.year == right.year &&
+        left.month == right.month &&
+        left.day == right.day;
   }
 
   String _extendCapacityLabel(TaskScheduleFeedback? feedback) {

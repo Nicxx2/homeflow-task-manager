@@ -7,6 +7,7 @@ import 'package:homeflow_mobile/src/core/models/app_preferences.dart';
 import 'package:homeflow_mobile/src/core/models/date_codec.dart';
 import 'package:homeflow_mobile/src/core/models/mobile_task.dart';
 import 'package:homeflow_mobile/src/core/models/saved_login.dart';
+import 'package:homeflow_mobile/src/core/models/task_schedule_feedback.dart';
 import 'package:homeflow_mobile/src/data/repositories/connection_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/pending_status_update_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/preferences_repository.dart';
@@ -17,6 +18,7 @@ import 'package:homeflow_mobile/src/data/repositories/widget_state_repository.da
 import 'package:homeflow_mobile/src/data/storage/in_memory_local_store.dart';
 import 'package:homeflow_mobile/src/data/storage/in_memory_secure_store.dart';
 import 'package:homeflow_mobile/src/presentation/screens/home_shell_screen.dart';
+import 'package:homeflow_mobile/src/presentation/widgets/task_schedule_sheet.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
@@ -216,6 +218,96 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets(
+    'schedule sheet opens with stored assignment date without checking capacity',
+    (tester) async {
+      final controller = _FakeAppController(
+        _buildServices(),
+        preferences: AppPreferences.defaults(),
+        active: const [],
+        overdue: const [],
+        completed: const [],
+      );
+      final task = _task(
+        id: 4,
+        title: 'Old assigned task',
+        bucket: 'overdue',
+        dueDate: DateTime.utc(2026, 5, 4),
+        assignmentDate: DateTime.utc(2026, 1, 2),
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppController>.value(
+          value: controller,
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showTaskScheduleSheet(context, task: task),
+                child: const Text('Open dates'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open dates'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+            formatDateOnlyLabel(task.assignmentDate!, 'EEE, dd MMM yyyy')),
+        findsOneWidget,
+      );
+      expect(find.text('Checking...'), findsNothing);
+      expect(find.textContaining('pts'), findsNothing);
+      expect(controller.scheduleCheckCount, 0);
+
+      controller.dispose();
+    },
+  );
+
+  testWidgets('upcoming rows hide metadata but keep date action',
+      (tester) async {
+    final upcomingDay = DateTime.utc(2026, 5, 6);
+    final controller = _FakeAppController(
+      _buildServices(),
+      preferences: AppPreferences.defaults(),
+      active: const [],
+      overdue: const [],
+      completed: const [],
+      upcomingDays: [upcomingDay],
+      tasksByDate: {
+        formatDateOnly(upcomingDay): [
+          _task(
+            id: 5,
+            title: 'Future task',
+            bucket: 'upcoming',
+            dueDate: upcomingDay,
+            assignmentDate: upcomingDay,
+          ),
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppController>.value(
+        value: controller,
+        child: const MaterialApp(home: HomeShellScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Upcoming'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Future task'), findsOneWidget);
+    expect(find.textContaining('assigned'), findsNothing);
+    expect(find.textContaining('due'), findsNothing);
+    expect(find.text('5 pts'), findsNothing);
+    expect(find.byTooltip('Adjust dates'), findsOneWidget);
+
+    controller.dispose();
+  });
 }
 
 MobileTask _task({
@@ -254,15 +346,22 @@ class _FakeAppController extends AppController {
     required List<MobileTask> active,
     required List<MobileTask> overdue,
     required List<MobileTask> completed,
+    List<DateTime> upcomingDays = const [],
+    Map<String, List<MobileTask>> tasksByDate = const {},
   })  : _preferences = preferences,
         _active = active,
         _overdue = overdue,
-        _completed = completed;
+        _completed = completed,
+        _upcomingDays = upcomingDays,
+        _tasksByDate = tasksByDate;
 
   final AppPreferences _preferences;
   final List<MobileTask> _active;
   final List<MobileTask> _overdue;
   final List<MobileTask> _completed;
+  final List<DateTime> _upcomingDays;
+  final Map<String, List<MobileTask>> _tasksByDate;
+  int scheduleCheckCount = 0;
 
   @override
   AppPreferences get preferences => _preferences;
@@ -275,6 +374,25 @@ class _FakeAppController extends AppController {
 
   @override
   List<MobileTask> get completedTodayTasks => _completed;
+
+  @override
+  List<DateTime> get upcomingDays => _upcomingDays;
+
+  @override
+  bool get canChangeTaskSchedule => true;
+
+  @override
+  List<MobileTask> tasksForDate(DateTime day) =>
+      _tasksByDate[formatDateOnly(day)] ?? const [];
+
+  @override
+  Future<TaskScheduleFeedback?> checkTaskSchedule({
+    required int taskId,
+    required DateTime assignmentDate,
+  }) async {
+    scheduleCheckCount += 1;
+    return null;
+  }
 
   @override
   String messageForDay(DateTime day) =>
