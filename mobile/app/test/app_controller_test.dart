@@ -314,6 +314,111 @@ void main() {
     secondController.dispose();
   });
 
+  test(
+      'future assigned overdue tasks move to upcoming when overdue section is hidden',
+      () async {
+    final services = _buildServices();
+    const settings = ConnectionSettings(
+      scheme: 'https',
+      host: 'example.com',
+      port: 443,
+    );
+    final session = _buildSession();
+    final today = DateTime.now().toUtc();
+    final futureAssignment =
+        DateTime.utc(today.year, today.month, today.day + 3);
+    final hiddenOverduePreferences = AppPreferences.defaults().copyWith(
+      showOverdueTasksInTodayView: false,
+    );
+    final snapshot = TaskCacheSnapshot(
+      serverBaseUrl: settings.baseUrl,
+      userEmail: session.user.email,
+      windowStart: DateTime.utc(today.year, today.month, today.day),
+      windowEnd: DateTime.utc(today.year, today.month, today.day + 7),
+      lastSuccessfulSyncAt: today.subtract(const Duration(minutes: 10)),
+      lastAttemptAt: today.subtract(const Duration(minutes: 1)),
+      lastSyncResult: SyncResultStatus.success,
+      tasks: [
+        _task(
+          id: 7,
+          title: 'Future assigned overdue',
+          bucket: 'overdue',
+          dueDate: DateTime.utc(today.year, today.month, today.day - 1),
+          assignmentDate: futureAssignment,
+        ),
+        _task(
+          id: 8,
+          title: 'Upcoming task',
+          bucket: 'upcoming',
+          dueDate: futureAssignment,
+          assignmentDate: futureAssignment,
+        ),
+      ],
+    );
+
+    await services.connectionRepository.save(settings);
+    await services.sessionRepository.save(session);
+    await services.preferencesRepository.save(hiddenOverduePreferences);
+    await services.taskCacheRepository.save(snapshot);
+
+    final controller = AppController(services);
+    await controller.initialize();
+
+    expect(controller.overdueTasks.map((task) => task.id), [7]);
+    expect(controller.upcomingTasks.map((task) => task.id), [7, 8]);
+    expect(
+        controller.groupedUpcomingTasks[futureAssignment]
+            ?.map((task) => task.id),
+        [7, 8]);
+
+    controller.dispose();
+  });
+
+  test(
+      'future assigned overdue tasks stay out of upcoming when overdue section is shown',
+      () async {
+    final services = _buildServices();
+    const settings = ConnectionSettings(
+      scheme: 'https',
+      host: 'example.com',
+      port: 443,
+    );
+    final session = _buildSession();
+    final today = DateTime.now().toUtc();
+    final futureAssignment =
+        DateTime.utc(today.year, today.month, today.day + 3);
+    final snapshot = TaskCacheSnapshot(
+      serverBaseUrl: settings.baseUrl,
+      userEmail: session.user.email,
+      windowStart: DateTime.utc(today.year, today.month, today.day),
+      windowEnd: DateTime.utc(today.year, today.month, today.day + 7),
+      lastSuccessfulSyncAt: today.subtract(const Duration(minutes: 10)),
+      lastAttemptAt: today.subtract(const Duration(minutes: 1)),
+      lastSyncResult: SyncResultStatus.success,
+      tasks: [
+        _task(
+          id: 9,
+          title: 'Future assigned overdue',
+          bucket: 'overdue',
+          dueDate: DateTime.utc(today.year, today.month, today.day - 1),
+          assignmentDate: futureAssignment,
+        ),
+      ],
+    );
+
+    await services.connectionRepository.save(settings);
+    await services.sessionRepository.save(session);
+    await services.taskCacheRepository.save(snapshot);
+
+    final controller = AppController(services);
+    await controller.initialize();
+
+    expect(controller.overdueTasks.map((task) => task.id), [9]);
+    expect(controller.upcomingTasks, isEmpty);
+
+    controller.dispose();
+  });
+
   test('offline status changes update cache and persist pending sync',
       () async {
     final services = _buildServices(httpClient: _OfflineClient());

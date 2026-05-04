@@ -239,7 +239,7 @@ class _UpcomingTab extends StatelessWidget {
             day: days[index],
             tasks: controller
                 .tasksForDate(days[index])
-                .where((task) => task.displayBucket == 'upcoming')
+                .where(controller.shouldShowTaskInUpcoming)
                 .toList(growable: false),
             initiallyExpanded: index == 0,
           ),
@@ -286,6 +286,7 @@ class _UpcomingDayCard extends StatelessWidget {
             emptyMessage: controller.messageForDay(day),
             showAssignmentDate: true,
             showMetadata: false,
+            showMinimalOverdueChip: true,
             isUpdatingTask: controller.isUpdatingTask,
             isStatusPending: controller.hasPendingStatusUpdate,
             onStatusSelected: controller.canChangeTaskStatus

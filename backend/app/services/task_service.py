@@ -324,15 +324,29 @@ class TaskService:
                     "valid": False,
                     "message": "Choose an assignment date for the selected assignee.",
                 }
-            validation = WorkloadService(self.db).validate_assignment(
-                user_id=assignee_id,
-                date_value=assignment_date,
-                task_points=task_points if task_points is not None else task.points_value,
-                exclude_task_id=task.id,
-                allow_policy_override=allow_policy_override,
+            assignment_changed = (
+                task.assignee_id != assignee_id
+                or task.assignment_date != assignment_date
             )
-            if not validation["valid"]:
-                return False, validation
+            points_value = task_points if task_points is not None else task.points_value
+            points_changed = task_points is not None and task_points != task.points_value
+            if assignment_changed or points_changed:
+                validation = WorkloadService(self.db).validate_assignment(
+                    user_id=assignee_id,
+                    date_value=assignment_date,
+                    task_points=points_value,
+                    exclude_task_id=task.id,
+                    allow_policy_override=allow_policy_override,
+                )
+                if not validation["valid"]:
+                    return False, validation
+            else:
+                validation = {
+                    "valid": True,
+                    "date": assignment_date.isoformat(),
+                    "task_points": points_value,
+                    "message": "Schedule saved.",
+                }
         else:
             validation = {"valid": True}
             assignment_date = None

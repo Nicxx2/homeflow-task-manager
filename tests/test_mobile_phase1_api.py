@@ -450,6 +450,48 @@ def test_mobile_schedule_update_uses_capacity_and_assignment_date_rules():
         db.close()
 
 
+def test_mobile_schedule_update_allows_due_date_only_change_for_existing_past_assignment():
+    client = TestClient(app)
+    db = SessionLocal()
+    try:
+        owner, _owner_password = _create_user(db, label="mobile-due-only-owner")
+        mobile_user, mobile_password = _create_user(db, label="mobile-due-only-member")
+        headers, _payload = _login_headers(client, email=mobile_user.email, password=mobile_password)
+
+        today = date.today()
+        task = _create_task(
+            db,
+            title="Due only change",
+            created_by_id=owner.id,
+            assignee_id=mobile_user.id,
+            assignment_date=today - timedelta(days=3),
+            due_date=today - timedelta(days=1),
+            status=TaskStatus.PENDING,
+            effort_level=EffortLevel.MEDIUM,
+        )
+
+        response = client.patch(
+            f"/api/v1/mobile/tasks/{task.id}/schedule",
+            headers=headers,
+            json={
+                "due_date": (today + timedelta(days=5)).isoformat(),
+                "assignment_date": (today - timedelta(days=3)).isoformat(),
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["task"]["due_date"] == (today + timedelta(days=5)).isoformat()
+        assert payload["task"]["assignment_date"] == (today - timedelta(days=3)).isoformat()
+        assert payload["feedback"]["valid"] is True
+
+        db.refresh(task)
+        assert task.due_date == today + timedelta(days=5)
+        assert task.assignment_date == today - timedelta(days=3)
+    finally:
+        db.close()
+
+
 def test_recurring_completion_returns_refresh_required_and_creates_completed_snapshot():
     client = TestClient(app)
     db = SessionLocal()

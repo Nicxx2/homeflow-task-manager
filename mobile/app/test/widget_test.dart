@@ -267,6 +267,57 @@ void main() {
     },
   );
 
+  testWidgets(
+    'schedule sheet saves due-date-only changes with unchanged past assignment',
+    (tester) async {
+      final controller = _FakeAppController(
+        _buildServices(),
+        preferences: AppPreferences.defaults(),
+        active: const [],
+        overdue: const [],
+        completed: const [],
+      );
+      final task = _task(
+        id: 7,
+        title: 'Due-only task',
+        bucket: 'overdue',
+        dueDate: DateTime.utc(2026, 5, 4),
+        assignmentDate: DateTime.utc(2026, 1, 2),
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppController>.value(
+          value: controller,
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showTaskScheduleSheet(context, task: task),
+                child: const Text('Open dates'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open dates'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Due'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('10').last);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(controller.scheduleUpdateCount, 1);
+      expect(controller.lastScheduleDueDate, DateTime.utc(2026, 5, 10));
+      expect(controller.lastScheduleAssignmentDate, task.assignmentDate);
+      expect(controller.scheduleCheckCount, 0);
+
+      controller.dispose();
+    },
+  );
+
   testWidgets('upcoming rows hide metadata but keep date action',
       (tester) async {
     final upcomingDay = DateTime.utc(2026, 5, 6);
@@ -302,7 +353,51 @@ void main() {
 
     expect(find.text('Future task'), findsOneWidget);
     expect(find.textContaining('assigned'), findsNothing);
-    expect(find.textContaining('due'), findsNothing);
+    expect(find.textContaining('due '), findsNothing);
+    expect(find.text('5 pts'), findsNothing);
+    expect(find.byTooltip('Adjust dates'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('upcoming rows show overdue chip when metadata is hidden',
+      (tester) async {
+    final upcomingDay = DateTime.utc(2026, 5, 6);
+    final controller = _FakeAppController(
+      _buildServices(),
+      preferences: AppPreferences.defaults().copyWith(
+        showOverdueTasksInTodayView: false,
+      ),
+      active: const [],
+      overdue: const [],
+      completed: const [],
+      upcomingDays: [upcomingDay],
+      tasksByDate: {
+        formatDateOnly(upcomingDay): [
+          _task(
+            id: 6,
+            title: 'Future overdue task',
+            bucket: 'overdue',
+            dueDate: DateTime.utc(2026, 5, 1),
+            assignmentDate: upcomingDay,
+          ),
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppController>.value(
+        value: controller,
+        child: const MaterialApp(home: HomeShellScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Upcoming'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Future overdue task'), findsOneWidget);
+    expect(find.text('overdue'), findsOneWidget);
+    expect(find.text('Pending - assigned 06 May - due 01 May'), findsNothing);
     expect(find.text('5 pts'), findsNothing);
     expect(find.byTooltip('Adjust dates'), findsOneWidget);
 
@@ -362,6 +457,9 @@ class _FakeAppController extends AppController {
   final List<DateTime> _upcomingDays;
   final Map<String, List<MobileTask>> _tasksByDate;
   int scheduleCheckCount = 0;
+  int scheduleUpdateCount = 0;
+  DateTime? lastScheduleDueDate;
+  DateTime? lastScheduleAssignmentDate;
 
   @override
   AppPreferences get preferences => _preferences;
@@ -386,12 +484,49 @@ class _FakeAppController extends AppController {
       _tasksByDate[formatDateOnly(day)] ?? const [];
 
   @override
+  bool shouldShowTaskInUpcoming(MobileTask task) {
+    if (task.displayBucket == 'upcoming') {
+      return true;
+    }
+    if (_preferences.showOverdueTasksInTodayView ||
+        task.displayBucket != 'overdue' ||
+        task.isCompleted) {
+      return false;
+    }
+    final assignmentDate = task.assignmentDate;
+    if (assignmentDate == null) {
+      return false;
+    }
+    final now = DateTime.now().toUtc();
+    final today = DateTime.utc(now.year, now.month, now.day);
+    final assignment = DateTime.utc(
+      assignmentDate.year,
+      assignmentDate.month,
+      assignmentDate.day,
+    );
+    return assignment.isAfter(today);
+  }
+
+  @override
   Future<TaskScheduleFeedback?> checkTaskSchedule({
     required int taskId,
     required DateTime assignmentDate,
   }) async {
     scheduleCheckCount += 1;
     return null;
+  }
+
+  @override
+  Future<bool> updateTaskSchedule({
+    required int taskId,
+    required DateTime dueDate,
+    required DateTime assignmentDate,
+    bool extendCapacity = false,
+  }) async {
+    scheduleUpdateCount += 1;
+    lastScheduleDueDate = dueDate;
+    lastScheduleAssignmentDate = assignmentDate;
+    return true;
   }
 
   @override

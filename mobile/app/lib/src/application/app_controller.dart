@@ -162,9 +162,21 @@ class AppController extends ChangeNotifier {
 
   List<MobileTask> get upcomingTasks {
     final tasks = _cacheSnapshot?.tasks ?? const <MobileTask>[];
-    return tasks
-        .where((task) => task.displayBucket == 'upcoming')
-        .toList(growable: false);
+    return tasks.where(shouldShowTaskInUpcoming).toList(growable: false);
+  }
+
+  bool shouldShowTaskInUpcoming(MobileTask task) {
+    if (task.displayBucket == 'upcoming') {
+      return true;
+    }
+    if (_preferences.showOverdueTasksInTodayView ||
+        task.displayBucket != 'overdue' ||
+        task.isCompleted) {
+      return false;
+    }
+    final assignmentDate = task.assignmentDate;
+    return assignmentDate != null &&
+        _dateOnly(assignmentDate).isAfter(_todayUtc());
   }
 
   Map<DateTime, List<MobileTask>> get groupedUpcomingTasks {

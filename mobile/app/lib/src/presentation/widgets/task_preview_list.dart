@@ -15,6 +15,7 @@ class TaskPreviewList extends StatelessWidget {
     this.showAssignmentDate = false,
     this.showDisplayBucketChip = false,
     this.showMetadata = true,
+    this.showMinimalOverdueChip = false,
     super.key,
   });
 
@@ -29,6 +30,7 @@ class TaskPreviewList extends StatelessWidget {
   final bool showAssignmentDate;
   final bool showDisplayBucketChip;
   final bool showMetadata;
+  final bool showMinimalOverdueChip;
 
   @override
   Widget build(BuildContext context) {
@@ -56,30 +58,14 @@ class TaskPreviewList extends StatelessWidget {
           child: ListTile(
             onTap: onTaskTap == null ? null : () => onTaskTap!(task),
             title: Text(task.title),
-            subtitle: showMetadata
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 4),
-                      Text(subtitleParts.join(' - ')),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          _TaskChip(label: '${task.pointsValue} pts'),
-                          if (task.isOverdue) const _TaskChip(label: 'overdue'),
-                          if (isStatusPending?.call(task.id) ?? false)
-                            const _TaskChip(label: 'pending sync'),
-                          if (showDisplayBucketChip)
-                            _TaskChip(label: task.displayBucket),
-                          if (task.recurrenceSummary != null)
-                            _TaskChip(label: task.recurrenceSummary!),
-                        ],
-                      ),
-                    ],
-                  )
-                : null,
+            subtitle: _TaskSubtitle(
+              task: task,
+              subtitle: subtitleParts.join(' - '),
+              showMetadata: showMetadata,
+              showMinimalOverdueChip: showMinimalOverdueChip,
+              showDisplayBucketChip: showDisplayBucketChip,
+              isStatusPending: isStatusPending?.call(task.id) ?? false,
+            ),
             trailing: _TaskActions(
               task: task,
               updating: updating,
@@ -89,6 +75,57 @@ class TaskPreviewList extends StatelessWidget {
           ),
         );
       }).toList(growable: false),
+    );
+  }
+}
+
+class _TaskSubtitle extends StatelessWidget {
+  const _TaskSubtitle({
+    required this.task,
+    required this.subtitle,
+    required this.showMetadata,
+    required this.showMinimalOverdueChip,
+    required this.showDisplayBucketChip,
+    required this.isStatusPending,
+  });
+
+  final MobileTask task;
+  final String subtitle;
+  final bool showMetadata;
+  final bool showMinimalOverdueChip;
+  final bool showDisplayBucketChip;
+  final bool isStatusPending;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!showMetadata && !(showMinimalOverdueChip && task.isOverdue)) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showMetadata) ...[
+          const SizedBox(height: 4),
+          Text(subtitle),
+          const SizedBox(height: 6),
+        ] else
+          const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            if (showMetadata) _TaskChip(label: '${task.pointsValue} pts'),
+            if (task.isOverdue) const _TaskChip(label: 'overdue'),
+            if (showMetadata && isStatusPending)
+              const _TaskChip(label: 'pending sync'),
+            if (showMetadata && showDisplayBucketChip)
+              _TaskChip(label: task.displayBucket),
+            if (showMetadata && task.recurrenceSummary != null)
+              _TaskChip(label: task.recurrenceSummary!),
+          ],
+        ),
+      ],
     );
   }
 }

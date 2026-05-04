@@ -313,7 +313,7 @@ class _TaskScheduleSheetState extends State<_TaskScheduleSheet> {
 
   Future<void> _save() async {
     final today = _today();
-    if (_assignmentDate.isBefore(today)) {
+    if (_assignmentNeedsValidation() && _assignmentDate.isBefore(today)) {
       setState(() {
         _message = 'Assignment date cannot be in the past.';
       });
@@ -366,7 +366,10 @@ class _TaskScheduleSheetState extends State<_TaskScheduleSheet> {
   }
 
   bool _canSaveSchedule() {
-    if (_checking || !_hasChanges() || _assignmentDate.isBefore(_today())) {
+    if (_checking || !_hasChanges()) {
+      return false;
+    }
+    if (_assignmentNeedsValidation() && _assignmentDate.isBefore(_today())) {
       return false;
     }
     if (!_assignmentNeedsValidation()) {
