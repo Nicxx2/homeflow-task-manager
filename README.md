@@ -272,6 +272,7 @@ Each user can personalize their own view without changing the experience for any
 
 Homeflow also includes an Android companion app for self-hosted servers.
 
+- Google Play: https://play.google.com/store/apps/details?id=com.homeflow.mobile
 - mobile source: `mobile/app/`
 - supporting mobile docs: `mobile/docs/`
 - a good starting point for implementation details: `mobile/docs/implementation-spec.md`
