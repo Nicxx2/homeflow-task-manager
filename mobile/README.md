@@ -4,6 +4,9 @@ This directory holds the Homeflow mobile companion app and its supporting docs.
 
 The mobile app is for users who run their own self-hosted Homeflow server. It is not a shared hosted backend.
 
+The Android app is available on Google Play:
+https://play.google.com/store/apps/details?id=com.homeflow.mobile
+
 Current structure:
 
 - `app/` Flutter mobile app source
