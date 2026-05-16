@@ -471,13 +471,7 @@ def test_member_status_update_setting_controls_cross_user_status_changes():
         settings = service.get_app_settings()
         original_member_status_updates = settings.allow_member_status_updates
         try:
-            service.update_login_access_settings(
-                public_registration_enabled=settings.public_registration_enabled,
-                auto_approve_registrations=settings.auto_approve_registrations,
-                login_theme_preference=settings.login_theme_preference,
-                registration_default_capacity_points=settings.registration_default_capacity_points,
-                allow_member_status_updates=False,
-            )
+            service.update_task_collaboration_settings(allow_member_status_updates=False)
 
             client = _authed_client(viewer)
             blocked = client.post(
@@ -496,13 +490,7 @@ def test_member_status_update_setting_controls_cross_user_status_changes():
             db.refresh(task)
             assert task.status == TaskStatus.IN_PROGRESS
 
-            service.update_login_access_settings(
-                public_registration_enabled=settings.public_registration_enabled,
-                auto_approve_registrations=settings.auto_approve_registrations,
-                login_theme_preference=settings.login_theme_preference,
-                registration_default_capacity_points=settings.registration_default_capacity_points,
-                allow_member_status_updates=True,
-            )
+            service.update_task_collaboration_settings(allow_member_status_updates=True)
             allowed = client.post(
                 f"/tasks/{task.id}/status",
                 data={"status_value": TaskStatus.COMPLETED.value},
@@ -515,11 +503,7 @@ def test_member_status_update_setting_controls_cross_user_status_changes():
             delete_response = client.post(f"/tasks/{task.id}/delete", follow_redirects=False)
             assert delete_response.status_code == 403
         finally:
-            service.update_login_access_settings(
-                public_registration_enabled=settings.public_registration_enabled,
-                auto_approve_registrations=settings.auto_approve_registrations,
-                login_theme_preference=settings.login_theme_preference,
-                registration_default_capacity_points=settings.registration_default_capacity_points,
+            service.update_task_collaboration_settings(
                 allow_member_status_updates=original_member_status_updates,
             )
     finally:
@@ -2392,6 +2376,63 @@ def test_login_access_settings_reject_invalid_default_capacity():
         assert response.status_code == 400
         assert "Default capacity for new registrations must be a whole number." in response.text
     finally:
+        db.close()
+
+
+def test_task_collaboration_settings_update_status_toggle_only():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        admin = _create_user(
+            db,
+            email=f"task-collab-admin-{token}@example.com",
+            full_name="Task Collaboration Admin",
+            capacity=10,
+            is_admin=True,
+            show_in_member_lists=False,
+        )
+        service = AdminSettingsService(db)
+        service.update_login_access_settings(
+            public_registration_enabled=False,
+            auto_approve_registrations=True,
+            login_theme_preference="dark",
+            registration_default_capacity_points=7,
+        )
+        service.update_task_collaboration_settings(allow_member_status_updates=False)
+
+        client = _authed_client(admin)
+        response = client.post(
+            "/admin/settings/task-collaboration",
+            data={"allow_member_status_updates": "true"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 302
+        db.expire_all()
+        settings = service.get_app_settings()
+        assert settings.allow_member_status_updates is True
+        assert settings.public_registration_enabled is False
+        assert settings.auto_approve_registrations is True
+        assert settings.login_theme_preference == "dark"
+        assert settings.registration_default_capacity_points == 7
+
+        response = client.post(
+            "/admin/settings/task-collaboration",
+            data={"allow_member_status_updates": "false"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        db.expire_all()
+        assert service.get_app_settings().allow_member_status_updates is False
+    finally:
+        AdminSettingsService(db).update_login_access_settings(
+            public_registration_enabled=True,
+            auto_approve_registrations=False,
+            login_theme_preference="light",
+            registration_default_capacity_points=None,
+        )
+        AdminSettingsService(db).update_task_collaboration_settings(allow_member_status_updates=False)
         db.close()
 
 

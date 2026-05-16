@@ -2318,7 +2318,6 @@ def admin_login_access_settings_save(
     request: Request,
     public_registration_enabled: str = Form("false"),
     auto_approve_registrations: str = Form("false"),
-    allow_member_status_updates: str = Form("false"),
     login_theme_preference: str = Form("light"),
     registration_default_capacity_points: str = Form(""),
     db: Session = Depends(get_db),
@@ -2340,13 +2339,26 @@ def admin_login_access_settings_save(
             auto_approve_registrations=auto_approve_registrations.lower() in {"true", "on", "1", "yes"},
             login_theme_preference=login_theme_preference,
             registration_default_capacity_points=parsed_default_capacity,
-            allow_member_status_updates=allow_member_status_updates.lower() in {"true", "on", "1", "yes"},
         )
         return RedirectResponse(url="/admin/settings", status_code=status.HTTP_302_FOUND)
     except ValueError as exc:
         context = _admin_settings_context(request=request, user=user, service=service, ai_test_result=None)
         context["login_access_result"] = {"ok": False, "error": str(exc)}
         return templates.TemplateResponse("admin/settings.html", context, status_code=status.HTTP_400_BAD_REQUEST)
+
+
+@router.post("/admin/settings/task-collaboration")
+def admin_task_collaboration_settings_save(
+    allow_member_status_updates: str = Form("false"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+    AdminSettingsService(db).update_task_collaboration_settings(
+        allow_member_status_updates=allow_member_status_updates.lower() in {"true", "on", "1", "yes"},
+    )
+    return RedirectResponse(url="/admin/settings", status_code=status.HTTP_302_FOUND)
 
 
 @router.post("/admin/settings/effort")

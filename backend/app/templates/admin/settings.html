@@ -2,7 +2,7 @@
 {% block content %}
 <header class="mb-6">
   <h1 class="text-2xl font-semibold">Admin Settings</h1>
-  <p class="text-slate-500 dark:text-slate-400">Manage users, workload defaults, login access, and AI behavior.</p>
+  <p class="text-slate-500 dark:text-slate-400">Manage users, workload defaults, login access, task collaboration, and AI behavior.</p>
 </header>
 
 <div class="grid md:grid-cols-2 gap-6">
@@ -195,17 +195,6 @@
         </span>
       </label>
 
-      <label class="flex items-start justify-between gap-3 text-sm">
-        <span>
-          <span class="block font-medium">Allow members to update visible task statuses</span>
-          <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Members can mark visible tasks as pending, in progress, or completed. Task details, assignments, and schedules still use the normal controls.</span>
-        </span>
-        <span class="flex items-center gap-2 pt-1">
-          <input type="hidden" name="allow_member_status_updates" value="false" />
-          <input type="checkbox" name="allow_member_status_updates" value="true" {% if app_settings.allow_member_status_updates %}checked{% endif %} />
-        </span>
-      </label>
-
       <label class="block text-sm">
         <span class="mb-1 block font-medium">Default capacity for new registrations</span>
         <input
@@ -229,6 +218,26 @@
 
       <div>
         <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save login page settings</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="bg-white rounded-xl border border-slate-200 p-5 dark:bg-slate-900 dark:border-slate-800 md:col-span-2">
+    <h2 class="font-medium mb-1">Task Collaboration</h2>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Choose how members can work together on tasks they can already see.</p>
+    <form method="post" action="/admin/settings/task-collaboration" class="space-y-4">
+      <label class="flex items-start justify-between gap-3 text-sm">
+        <span>
+          <span class="block font-medium">Allow members to update visible task statuses</span>
+          <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Members can mark visible tasks as pending, in progress, or completed. Editing task details, assignments, schedules, and deletion still follow the normal permissions.</span>
+        </span>
+        <span class="flex items-center gap-2 pt-1">
+          <input type="hidden" name="allow_member_status_updates" value="false" />
+          <input type="checkbox" name="allow_member_status_updates" value="true" {% if app_settings.allow_member_status_updates %}checked{% endif %} />
+        </span>
+      </label>
+      <div>
+        <button class="app-primary-button rounded-md px-4 py-2" type="submit">Save collaboration settings</button>
       </div>
     </form>
   </section>

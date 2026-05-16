@@ -100,7 +100,6 @@ class AdminSettingsService:
         auto_approve_registrations: bool,
         login_theme_preference: str,
         registration_default_capacity_points: int | None,
-        allow_member_status_updates: bool | None = None,
     ) -> AppSettings:
         selected_theme = login_theme_preference.strip().lower()
         if selected_theme not in self.ALLOWED_THEME_PREFERENCES:
@@ -113,8 +112,14 @@ class AdminSettingsService:
         settings.auto_approve_registrations = auto_approve_registrations
         settings.login_theme_preference = selected_theme
         settings.registration_default_capacity_points = registration_default_capacity_points
-        if allow_member_status_updates is not None:
-            settings.allow_member_status_updates = allow_member_status_updates
+        self.db.add(settings)
+        self.db.commit()
+        self.db.refresh(settings)
+        return settings
+
+    def update_task_collaboration_settings(self, *, allow_member_status_updates: bool) -> AppSettings:
+        settings = self.get_app_settings()
+        settings.allow_member_status_updates = allow_member_status_updates
         self.db.add(settings)
         self.db.commit()
         self.db.refresh(settings)
