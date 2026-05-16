@@ -46,8 +46,15 @@ def _can_delete_task(*, viewer: User, task) -> bool:
     return viewer.is_admin or task.created_by_id == viewer.id
 
 
-def _can_update_task_status(*, viewer: User, task) -> bool:
-    return viewer.is_admin or task.assignee_id == viewer.id
+def _can_update_task_status(*, viewer: User, task, db: Session) -> bool:
+    if viewer.is_admin or task.assignee_id == viewer.id:
+        return True
+    settings = AdminSettingsService(db).get_app_settings()
+    return (
+        settings.allow_member_status_updates
+        and viewer.is_active
+        and viewer.approval_status == AuthService.APPROVAL_APPROVED
+    )
 
 
 def _can_override_schedule_for_assignment(*, viewer: User, assignee_id: int | None) -> bool:
@@ -333,7 +340,7 @@ def _task_detail_context(
         "current_page_url": current_page_url,
         "can_manage_task": _can_manage_task(viewer=user, task=task),
         "can_delete_task": _can_delete_task(viewer=user, task=task),
-        "can_update_status": _can_update_task_status(viewer=user, task=task),
+        "can_update_status": _can_update_task_status(viewer=user, task=task, db=db),
         "is_history_occurrence": is_history_occurrence,
         "personal_highlight_color": getattr(task, "personal_highlight_color", None),
         "personal_highlight_default": getattr(task, "personal_highlight_color", None) or user.accent_color,
@@ -1735,7 +1742,7 @@ def task_status_submit(
     task = service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    if not _can_update_task_status(viewer=user, task=task):
+    if not _can_update_task_status(viewer=user, task=task, db=db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed.")
 
     try:
@@ -2164,7 +2171,7 @@ def day_view(
                     {
                         "task": task,
                         "can_open": _can_access_task_detail(viewer=user, task=task),
-                        "can_update_status": _can_update_task_status(viewer=user, task=task),
+                        "can_update_status": _can_update_task_status(viewer=user, task=task, db=db),
                         "can_manage_task": _can_manage_task(viewer=user, task=task),
                         "assignable_users": _assignable_users_for_task(db, task),
                     }
@@ -2311,6 +2318,7 @@ def admin_login_access_settings_save(
     request: Request,
     public_registration_enabled: str = Form("false"),
     auto_approve_registrations: str = Form("false"),
+    allow_member_status_updates: str = Form("false"),
     login_theme_preference: str = Form("light"),
     registration_default_capacity_points: str = Form(""),
     db: Session = Depends(get_db),
@@ -2332,6 +2340,7 @@ def admin_login_access_settings_save(
             auto_approve_registrations=auto_approve_registrations.lower() in {"true", "on", "1", "yes"},
             login_theme_preference=login_theme_preference,
             registration_default_capacity_points=parsed_default_capacity,
+            allow_member_status_updates=allow_member_status_updates.lower() in {"true", "on", "1", "yes"},
         )
         return RedirectResponse(url="/admin/settings", status_code=status.HTTP_302_FOUND)
     except ValueError as exc:

@@ -29,6 +29,20 @@ class TaskCreate(BaseModel):
             raise ValueError("Recurring task values must be positive.")
         return value
 
+    @field_validator("recurrence_pattern")
+    @classmethod
+    def recurrence_pattern_must_be_supported(cls, value: str | None) -> str | None:
+        if value is not None and value != "weekly":
+            raise ValueError("Only weekly recurring tasks are supported.")
+        return value
+
+    @field_validator("recurrence_blocked_behavior")
+    @classmethod
+    def recurrence_blocked_behavior_must_be_supported(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"skip", "move_same_week"}:
+            raise ValueError("Invalid recurring blocked-date behavior.")
+        return value
+
     @field_validator("title")
     @classmethod
     def title_must_not_be_blank(cls, value: str) -> str:
@@ -60,6 +74,20 @@ class TaskUpdate(BaseModel):
     def recurrence_values_must_be_positive(cls, value: int | None) -> int | None:
         if value is not None and value <= 0:
             raise ValueError("Recurring task values must be positive.")
+        return value
+
+    @field_validator("recurrence_pattern")
+    @classmethod
+    def recurrence_pattern_must_be_supported(cls, value: str | None) -> str | None:
+        if value is not None and value != "weekly":
+            raise ValueError("Only weekly recurring tasks are supported.")
+        return value
+
+    @field_validator("recurrence_blocked_behavior")
+    @classmethod
+    def recurrence_blocked_behavior_must_be_supported(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"skip", "move_same_week"}:
+            raise ValueError("Invalid recurring blocked-date behavior.")
         return value
 
     @field_validator("title")

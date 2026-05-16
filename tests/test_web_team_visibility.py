@@ -442,6 +442,90 @@ def test_quick_status_update_redirects_back_to_current_view():
         db.close()
 
 
+def test_member_status_update_setting_controls_cross_user_status_changes():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"status-toggle-viewer-{token}@example.com",
+            full_name="Status Toggle Viewer",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"status-toggle-mate-{token}@example.com",
+            full_name="Status Toggle Mate",
+            capacity=10,
+        )
+        task = _create_task(
+            db,
+            creator=teammate,
+            assignee=teammate,
+            title=f"Shared Status Task {token}",
+            day=date.today() + timedelta(days=2),
+        )
+
+        service = AdminSettingsService(db)
+        settings = service.get_app_settings()
+        original_member_status_updates = settings.allow_member_status_updates
+        try:
+            service.update_login_access_settings(
+                public_registration_enabled=settings.public_registration_enabled,
+                auto_approve_registrations=settings.auto_approve_registrations,
+                login_theme_preference=settings.login_theme_preference,
+                registration_default_capacity_points=settings.registration_default_capacity_points,
+                allow_member_status_updates=False,
+            )
+
+            client = _authed_client(viewer)
+            blocked = client.post(
+                f"/tasks/{task.id}/status",
+                data={"status_value": TaskStatus.COMPLETED.value},
+                follow_redirects=False,
+            )
+            assert blocked.status_code == 403
+
+            assignee_response = _authed_client(teammate).post(
+                f"/tasks/{task.id}/status",
+                data={"status_value": TaskStatus.IN_PROGRESS.value},
+                follow_redirects=False,
+            )
+            assert assignee_response.status_code == 302
+            db.refresh(task)
+            assert task.status == TaskStatus.IN_PROGRESS
+
+            service.update_login_access_settings(
+                public_registration_enabled=settings.public_registration_enabled,
+                auto_approve_registrations=settings.auto_approve_registrations,
+                login_theme_preference=settings.login_theme_preference,
+                registration_default_capacity_points=settings.registration_default_capacity_points,
+                allow_member_status_updates=True,
+            )
+            allowed = client.post(
+                f"/tasks/{task.id}/status",
+                data={"status_value": TaskStatus.COMPLETED.value},
+                follow_redirects=False,
+            )
+            assert allowed.status_code == 302
+            db.refresh(task)
+            assert task.status == TaskStatus.COMPLETED
+
+            delete_response = client.post(f"/tasks/{task.id}/delete", follow_redirects=False)
+            assert delete_response.status_code == 403
+        finally:
+            service.update_login_access_settings(
+                public_registration_enabled=settings.public_registration_enabled,
+                auto_approve_registrations=settings.auto_approve_registrations,
+                login_theme_preference=settings.login_theme_preference,
+                registration_default_capacity_points=settings.registration_default_capacity_points,
+                allow_member_status_updates=original_member_status_updates,
+            )
+    finally:
+        db.close()
+
+
 def test_assignment_success_redirects_to_tasks_list():
     db = SessionLocal()
     try:

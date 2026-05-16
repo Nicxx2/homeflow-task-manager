@@ -1,7 +1,7 @@
 name: homeflow_mobile
 description: Mobile companion app for self-hosted Homeflow task manager.
 publish_to: "none"
-version: 2.5.2+16
+version: 2.5.3+17
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

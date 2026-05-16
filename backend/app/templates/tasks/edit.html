@@ -235,7 +235,7 @@
       <label class="mt-3 block text-sm">
         <span class="mb-1 block">If the scheduled day is blocked</span>
         <select name="recurrence_blocked_behavior" class="w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-          <option value="skip" {% if form_values.recurrence_blocked_behavior == "skip" %}selected{% endif %}>Skip that occurrence and resume next week</option>
+          <option value="skip" {% if form_values.recurrence_blocked_behavior == "skip" %}selected{% endif %}>Skip that occurrence</option>
           <option value="move_same_week" {% if form_values.recurrence_blocked_behavior == "move_same_week" %}selected{% endif %}>Move to the next allowed day in the same week</option>
         </select>
       </label>

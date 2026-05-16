@@ -215,8 +215,24 @@ class HomeflowApiClient {
   }
 
   Map<String, dynamic> _decodeJson(http.Response response) {
-    final dynamic decoded =
-        response.body.isEmpty ? <String, dynamic>{} : jsonDecode(response.body);
+    final dynamic decoded;
+    try {
+      decoded = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body);
+    } on FormatException {
+      throw ApiException(
+        type: response.statusCode >= 500
+            ? ApiErrorType.serverError
+            : ApiErrorType.unknown,
+        message: response.statusCode >= 500
+            ? 'Server returned an invalid error response.'
+            : 'Unexpected response from the server.',
+        statusCode: response.statusCode,
+        retryable: response.statusCode >= 500,
+      );
+    }
+
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (decoded is Map<String, dynamic>) {
         return decoded;

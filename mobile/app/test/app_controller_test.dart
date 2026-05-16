@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +12,8 @@ import 'package:homeflow_mobile/src/core/models/mobile_task.dart';
 import 'package:homeflow_mobile/src/core/models/saved_login.dart';
 import 'package:homeflow_mobile/src/core/models/task_cache_snapshot.dart';
 import 'package:homeflow_mobile/src/core/models/today_widget_snapshot.dart';
+import 'package:homeflow_mobile/src/data/api/api_exception.dart';
+import 'package:homeflow_mobile/src/data/api/homeflow_api_client.dart';
 import 'package:homeflow_mobile/src/data/repositories/connection_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/pending_status_update_repository.dart';
 import 'package:homeflow_mobile/src/data/repositories/preferences_repository.dart';
@@ -54,6 +58,23 @@ void main() {
       expect(fallbackPortSettings.baseUrl, 'https://demo.example.com:8443');
     },
   );
+
+  test('api client maps non-json server errors to ApiException', () async {
+    final client = HomeflowApiClient(
+      baseUrl: 'https://example.com',
+      httpClient: _HtmlErrorClient(),
+    );
+
+    await expectLater(
+      client.testConnection(),
+      throwsA(
+        isA<ApiException>()
+            .having((error) => error.type, 'type', ApiErrorType.serverError)
+            .having((error) => error.statusCode, 'statusCode', 500)
+            .having((error) => error.retryable, 'retryable', isTrue),
+      ),
+    );
+  });
 
   test(
     'initialize keeps cached auth-required state out of manual sign-in status when session is still active',
@@ -550,5 +571,16 @@ class _OfflineClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     throw const SocketException('offline');
+  }
+}
+
+class _HtmlErrorClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    return http.StreamedResponse(
+      Stream<List<int>>.value(utf8.encode('<html>Server error</html>')),
+      500,
+      headers: <String, String>{'content-type': 'text/html'},
+    );
   }
 }

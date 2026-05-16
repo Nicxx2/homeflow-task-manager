@@ -320,7 +320,7 @@ void main() {
 
   testWidgets('upcoming rows hide metadata but keep date action',
       (tester) async {
-    final upcomingDay = DateTime.utc(2026, 5, 6);
+    final upcomingDay = _futureDay(3);
     final controller = _FakeAppController(
       _buildServices(),
       preferences: AppPreferences.defaults(),
@@ -362,7 +362,7 @@ void main() {
 
   testWidgets('upcoming rows show overdue chip when metadata is hidden',
       (tester) async {
-    final upcomingDay = DateTime.utc(2026, 5, 6);
+    final upcomingDay = _futureDay(3);
     final controller = _FakeAppController(
       _buildServices(),
       preferences: AppPreferences.defaults().copyWith(
@@ -378,7 +378,7 @@ void main() {
             id: 6,
             title: 'Future overdue task',
             bucket: 'overdue',
-            dueDate: DateTime.utc(2026, 5, 1),
+            dueDate: upcomingDay.subtract(const Duration(days: 5)),
             assignmentDate: upcomingDay,
           ),
         ],
@@ -403,6 +403,13 @@ void main() {
 
     controller.dispose();
   });
+}
+
+DateTime _futureDay(int offsetDays) {
+  final now = DateTime.now().toUtc();
+  return DateTime.utc(now.year, now.month, now.day).add(
+    Duration(days: offsetDays),
+  );
 }
 
 MobileTask _task({

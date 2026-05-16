@@ -8,7 +8,7 @@ from backend.app.db.session import SessionLocal, engine
 from backend.app.models.enums import EffortLevel
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user import User
-from backend.app.schemas.task import TaskCreate
+from backend.app.schemas.task import TaskCreate, TaskUpdate
 from backend.app.services.ai_service import AIService
 from backend.app.services.task_service import TaskService
 
@@ -24,6 +24,38 @@ def test_task_create_requires_effort_level():
             description="Desc",
             due_date=date.today() + timedelta(days=1),
             # effort_level intentionally missing
+        )
+
+
+def test_task_create_rejects_unsupported_recurrence_values():
+    with pytest.raises(ValidationError):
+        TaskCreate(
+            title="Task",
+            description="Desc",
+            due_date=date.today() + timedelta(days=1),
+            effort_level=EffortLevel.LOW,
+            recurrence_pattern="monthly",
+        )
+
+    with pytest.raises(ValidationError):
+        TaskCreate(
+            title="Task",
+            description="Desc",
+            due_date=date.today() + timedelta(days=1),
+            effort_level=EffortLevel.LOW,
+            recurrence_pattern="weekly",
+            recurrence_blocked_behavior="next_best_day",
+        )
+
+
+def test_task_update_rejects_unsupported_recurrence_values():
+    with pytest.raises(ValidationError):
+        TaskUpdate(
+            title="Task",
+            description="Desc",
+            due_date=date.today() + timedelta(days=1),
+            effort_level=EffortLevel.LOW,
+            recurrence_pattern="daily",
         )
 
 

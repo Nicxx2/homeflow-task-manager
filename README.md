@@ -196,8 +196,12 @@ If someone is away or has blocked days
 
 ---
 
-## ✨ What is new in v2.5.2
+## What is new in v2.5.3
 
+- Web admins can optionally allow approved members to update visible task statuses while keeping edit, delete, assignment, and schedule controls unchanged.
+- Recurring-task API input is limited to the supported weekly recurrence model, while every X weeks still works.
+- Task creation now re-syncs AI-selected effort after the AI panel updates, so Save enables reliably.
+- Mobile API handling now reports malformed server responses as normal API errors.
 - Mobile Today is now assignment-date first, so active and completed work reflects what is planned for the signed-in user today.
 - Completed mobile tasks no longer reappear later just because their due date arrives.
 - Mobile overdue handling now stays clearer: tasks assigned today remain in Today, with a compact overdue label when their due date has already passed.
