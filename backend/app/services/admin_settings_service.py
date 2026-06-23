@@ -8,6 +8,7 @@ from backend.app.models.ai_model_registry import AIModelRegistry
 from backend.app.models.ai_settings import AISettings
 from backend.app.models.app_settings import AppSettings
 from backend.app.models.enums import EffortLevel
+from backend.app.models.remembered_device import RememberedDevice
 from backend.app.models.task import Task
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user import User
@@ -197,6 +198,12 @@ class AdminSettingsService:
         capacity = self.db.get(UserDailyCapacity, user.id)
         if capacity:
             self.db.delete(capacity)
+
+        for remembered_device in self.db.scalars(
+            select(RememberedDevice).where(RememberedDevice.user_id == user.id)
+        ).all():
+            self.db.delete(remembered_device)
+
         self.db.delete(user)
         self.db.commit()
         return user
@@ -250,6 +257,11 @@ class AdminSettingsService:
             select(UserTaskDisplayPreference).where(UserTaskDisplayPreference.user_id == user.id)
         ).all():
             self.db.delete(display_pref)
+
+        for remembered_device in self.db.scalars(
+            select(RememberedDevice).where(RememberedDevice.user_id == user.id)
+        ).all():
+            self.db.delete(remembered_device)
 
         self.db.delete(user)
         self.db.commit()

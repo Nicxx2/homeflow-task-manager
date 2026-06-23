@@ -2,7 +2,7 @@ import json
 from datetime import date, timedelta
 from urllib.parse import quote, urlparse
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
@@ -28,6 +28,52 @@ from backend.app.services.workload_service import WorkloadService
 
 router = APIRouter()
 templates = Jinja2Templates(directory="backend/app/templates")
+EASY_LOGON_COOKIE_NAME = "homeflow_easy_logon"
+EASY_LOGON_COOKIE_MAX_AGE_SECONDS = AuthService.EASY_LOGON_TOKEN_DAYS * 24 * 60 * 60
+
+
+def _is_secure_request(request: Request) -> bool:
+    return request.url.scheme == "https"
+
+
+def _is_checked(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"true", "on", "1", "yes"}
+
+
+def _set_access_token_cookie(response: RedirectResponse, request: Request, token: str) -> None:
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure_request(request),
+    )
+
+
+def _set_easy_logon_cookie(response: RedirectResponse, request: Request, token: str) -> None:
+    response.set_cookie(
+        key=EASY_LOGON_COOKIE_NAME,
+        value=token,
+        max_age=EASY_LOGON_COOKIE_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure_request(request),
+    )
+
+
+def _easy_logon_profile_context(user: User) -> dict:
+    display_name = user.full_name.strip() if user.full_name else user.email
+    name_parts = [part for part in display_name.replace(".", " ").split() if part]
+    if len(name_parts) >= 2:
+        initials = f"{name_parts[0][0]}{name_parts[-1][0]}"
+    else:
+        initials = display_name[:1] or user.email[:1]
+    return {
+        "display_name": display_name,
+        "email": user.email,
+        "initials": initials.upper(),
+        "accent_color": user.accent_color or "#4f46e5",
+    }
 
 
 def _is_history_occurrence(task) -> bool:
@@ -639,13 +685,18 @@ def _login_page_context(
     error: str | None = None,
     register_error: str | None = None,
     register_success: str | None = None,
+    easy_logon_profile: dict | None = None,
 ) -> dict:
     auth_service = AuthService(db)
+    show_easy_logon = easy_logon_profile is not None
     return {
         "request": request,
         "error": error,
         "register_error": register_error,
         "register_success": register_success,
+        "easy_logon_profile": easy_logon_profile,
+        "show_easy_logon": show_easy_logon,
+        "show_login_form": not show_easy_logon,
         "auto_approve_registrations": auth_service.get_auto_approve_registrations(),
         "public_registration_enabled": auth_service.get_public_registration_enabled(),
         "login_theme_preference": auth_service.get_login_theme_preference(),
@@ -659,8 +710,63 @@ def root() -> RedirectResponse:
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse("login.html", _login_page_context(request=request, db=db))
+def login_page(
+    request: Request,
+    manual: str | None = None,
+    easy_logon_token: str | None = Cookie(default=None, alias=EASY_LOGON_COOKIE_NAME),
+    db: Session = Depends(get_db),
+):
+    service = AuthService(db)
+    remembered_device = service.get_valid_remembered_device(easy_logon_token)
+    show_profile = remembered_device is not None and manual != "1"
+    context = _login_page_context(
+        request=request,
+        db=db,
+        easy_logon_profile=_easy_logon_profile_context(remembered_device.user) if show_profile else None,
+    )
+    response = templates.TemplateResponse("login.html", context)
+    if easy_logon_token and remembered_device is None:
+        response.delete_cookie(EASY_LOGON_COOKIE_NAME)
+    return response
+
+
+@router.post("/login/easy", response_class=HTMLResponse)
+def easy_login_submit(
+    request: Request,
+    easy_logon_token: str | None = Cookie(default=None, alias=EASY_LOGON_COOKIE_NAME),
+    db: Session = Depends(get_db),
+):
+    service = AuthService(db)
+    user = service.authenticate_remembered_device(easy_logon_token)
+    if not user:
+        response = templates.TemplateResponse(
+            "login.html",
+            _login_page_context(
+                request=request,
+                db=db,
+                error="Easy Logon expired. Sign in with your password.",
+            ),
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+        response.delete_cookie(EASY_LOGON_COOKIE_NAME)
+        return response
+
+    token = service.issue_token(user)
+    response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+    _set_access_token_cookie(response, request, token)
+    _set_easy_logon_cookie(response, request, easy_logon_token)
+    return response
+
+
+@router.post("/login/easy/remove", response_class=HTMLResponse)
+def easy_login_remove(
+    easy_logon_token: str | None = Cookie(default=None, alias=EASY_LOGON_COOKIE_NAME),
+    db: Session = Depends(get_db),
+):
+    AuthService(db).revoke_remembered_device_token(easy_logon_token)
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(EASY_LOGON_COOKIE_NAME)
+    return response
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -668,6 +774,8 @@ def login_submit(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    enable_easy_logon: str = Form("false"),
+    easy_logon_token: str | None = Cookie(default=None, alias=EASY_LOGON_COOKIE_NAME),
     db: Session = Depends(get_db),
 ):
     service = AuthService(db)
@@ -687,7 +795,11 @@ def login_submit(
     token = service.issue_token(user)
     service.touch_activity(user)
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
-    response.set_cookie(key="access_token", value=token, httponly=True, samesite="lax")
+    _set_access_token_cookie(response, request, token)
+    if _is_checked(enable_easy_logon):
+        service.revoke_remembered_device_token(easy_logon_token)
+        remembered_token, _ = service.create_remembered_device(user, user_agent=request.headers.get("user-agent"))
+        _set_easy_logon_cookie(response, request, remembered_token)
     return response
 
 

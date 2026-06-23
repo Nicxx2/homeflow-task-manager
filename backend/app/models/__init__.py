@@ -2,6 +2,7 @@ from backend.app.models.ai_error_log import AIErrorLog
 from backend.app.models.ai_model_registry import AIModelRegistry
 from backend.app.models.ai_settings import AISettings
 from backend.app.models.app_settings import AppSettings
+from backend.app.models.remembered_device import RememberedDevice
 from backend.app.models.task import Task
 from backend.app.models.task_effort_config import TaskEffortConfig
 from backend.app.models.user_away_period import UserAwayPeriod
@@ -23,5 +24,6 @@ __all__ = [
     "AIModelRegistry",
     "AISettings",
     "AppSettings",
+    "RememberedDevice",
     "AIErrorLog",
 ]

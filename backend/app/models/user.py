@@ -62,3 +62,4 @@ class User(Base):
     daily_capacity = relationship("UserDailyCapacity", back_populates="user", uselist=False)
     scheduling_preference = relationship("UserSchedulingPreference", back_populates="user", uselist=False)
     away_periods = relationship("UserAwayPeriod", back_populates="user")
+    remembered_devices = relationship("RememberedDevice", back_populates="user", cascade="all, delete-orphan")

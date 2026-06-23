@@ -1,1 +1,1 @@
-const String appReleaseLabel = 'v2.5.3';
+const String appReleaseLabel = 'v2.5.4';

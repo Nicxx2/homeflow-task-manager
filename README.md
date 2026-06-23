@@ -196,8 +196,9 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.5.3
+## What is new in v2.5.4
 
+- Web Easy Logon lets a trusted browser remember one approved profile per device, with a rolling 30-day expiry and a remove option.
 - Web admins can optionally allow approved members to update visible task statuses while keeping edit, delete, assignment, and schedule controls unchanged.
 - Recurring-task API input is limited to the supported weekly recurrence model, while every X weeks still works.
 - Task creation now re-syncs AI-selected effort after the AI panel updates, so Save enables reliably.

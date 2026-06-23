@@ -1,9 +1,12 @@
-from datetime import datetime, timezone
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models.app_settings import AppSettings
+from backend.app.models.remembered_device import RememberedDevice
 from backend.app.core.security import build_access_token, create_access_token, get_password_hash, verify_password
 from backend.app.models.user import User
 from backend.app.models.user_daily_capacity import UserDailyCapacity
@@ -19,6 +22,7 @@ class AuthService:
     APPROVAL_PENDING = "pending"
     APPROVAL_APPROVED = "approved"
     APPROVAL_REJECTED = "rejected"
+    EASY_LOGON_TOKEN_DAYS = 30
 
     def __init__(self, db: Session):
         self.db = db
@@ -111,6 +115,88 @@ class AuthService:
 
     def issue_token_with_expiry(self, user: User) -> tuple[str, datetime]:
         return build_access_token(subject=str(user.id))
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _hash_remembered_device_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def create_remembered_device(self, user: User, *, user_agent: str | None = None) -> tuple[str, RememberedDevice]:
+        now = datetime.now(timezone.utc)
+        token = secrets.token_urlsafe(48)
+        device = RememberedDevice(
+            user_id=user.id,
+            token_hash=self._hash_remembered_device_token(token),
+            user_agent=(user_agent or "")[:500] or None,
+            expires_at=now + timedelta(days=self.EASY_LOGON_TOKEN_DAYS),
+        )
+        self.db.add(device)
+        self.db.commit()
+        self.db.refresh(device)
+        return token, device
+
+    def get_valid_remembered_device(self, token: str | None) -> RememberedDevice | None:
+        if not token:
+            return None
+
+        device = self.db.scalar(
+            select(RememberedDevice).where(
+                RememberedDevice.token_hash == self._hash_remembered_device_token(token),
+                RememberedDevice.revoked_at.is_(None),
+            )
+        )
+        if not device:
+            return None
+
+        now = datetime.now(timezone.utc)
+        if self._as_utc(device.expires_at) <= now:
+            device.revoked_at = now
+            self.db.add(device)
+            self.db.commit()
+            return None
+
+        user = device.user
+        if not user or not user.is_active or user.approval_status != self.APPROVAL_APPROVED:
+            return None
+        return device
+
+    def authenticate_remembered_device(self, token: str | None) -> User | None:
+        device = self.get_valid_remembered_device(token)
+        if not device:
+            return None
+
+        now = datetime.now(timezone.utc)
+        device.last_used_at = now
+        device.expires_at = now + timedelta(days=self.EASY_LOGON_TOKEN_DAYS)
+        device.user.last_activity_at = now
+        self.db.add(device)
+        self.db.add(device.user)
+        self.db.commit()
+        self.db.refresh(device.user)
+        return device.user
+
+    def revoke_remembered_device_token(self, token: str | None) -> bool:
+        if not token:
+            return False
+
+        device = self.db.scalar(
+            select(RememberedDevice).where(
+                RememberedDevice.token_hash == self._hash_remembered_device_token(token),
+                RememberedDevice.revoked_at.is_(None),
+            )
+        )
+        if not device:
+            return False
+
+        device.revoked_at = datetime.now(timezone.utc)
+        self.db.add(device)
+        self.db.commit()
+        return True
 
     def touch_activity(self, user: User) -> None:
         user.last_activity_at = datetime.now(timezone.utc)
