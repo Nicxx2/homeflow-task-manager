@@ -254,16 +254,20 @@ def test_suggest_next_available_date_skips_blocked_weekdays_and_away_periods():
             },
         )
 
-        start = date(2026, 4, 11)  # Saturday
+        days_until_saturday = (5 - date.today().weekday()) % 7
+        start = date.today() + timedelta(days=days_until_saturday)
+        monday = start + timedelta(days=2)
+        tuesday = start + timedelta(days=3)
+        wednesday = start + timedelta(days=4)
         scheduling.add_away_period(
             user_id=assignee.id,
-            start_date=date(2026, 4, 14),
-            end_date=date(2026, 4, 14),
+            start_date=tuesday,
+            end_date=tuesday,
             note="Away Tuesday",
         )
 
-        monday_full = _create_task(db, creator, EffortLevel.HIGH, "Monday full", date(2026, 4, 13))
-        TaskService(db).assign_task(monday_full, assignee_id=assignee.id, assignment_date=date(2026, 4, 13))
+        monday_full = _create_task(db, creator, EffortLevel.HIGH, "Monday full", monday)
+        TaskService(db).assign_task(monday_full, assignee_id=assignee.id, assignment_date=monday)
 
         task = _create_task(db, creator, EffortLevel.LOW, "Blocked start", start)
         suggestion = WorkloadService(db).suggest_next_available_date(
@@ -273,10 +277,9 @@ def test_suggest_next_available_date_skips_blocked_weekdays_and_away_periods():
             max_days=7,
         )
 
-        assert suggestion == date(2026, 4, 15)
+        assert suggestion == wednesday
     finally:
         db.close()
-
 
 def test_future_lookup_does_not_delete_upcoming_away_period():
     db = SessionLocal()
@@ -341,18 +344,20 @@ def test_weekly_recurring_task_rolls_forward_with_single_active_task():
         token = uuid4().hex[:8]
         creator = _create_user(db, f"phase3-creator8-{token}@example.com", 10)
         assignee = _create_user(db, f"phase3-assignee8-{token}@example.com", 10)
+        first_due = date.today() + timedelta(days=7)
+        blocked_due = first_due + timedelta(weeks=1)
         scheduling = SchedulingService(db)
         scheduling.add_away_period(
             user_id=assignee.id,
-            start_date=date(2026, 4, 15),
-            end_date=date(2026, 4, 15),
-            note="Away on Wednesday",
+            start_date=blocked_due,
+            end_date=blocked_due,
+            note="Away on recurring day",
         )
 
         payload = TaskCreate(
             title="Weekly bins",
             description="Take bins out",
-            due_date=date(2026, 4, 8),
+            due_date=first_due,
             effort_level=EffortLevel.LOW,
             ai_suggested_level=EffortLevel.LOW,
             ai_confidence=0.7,
@@ -373,28 +378,27 @@ def test_weekly_recurring_task_rolls_forward_with_single_active_task():
         db.refresh(root)
 
         assert root.status == TaskStatus.PENDING
-        assert root.due_date == date(2026, 4, 16)
-        assert root.assignment_date == date(2026, 4, 16)
+        assert root.due_date == blocked_due + timedelta(days=1)
+        assert root.assignment_date == blocked_due + timedelta(days=1)
 
         history = RecurringTaskService(db).get_history(root.id)
         assert len(history) == 1
-        assert history[0].due_date == date(2026, 4, 8)
+        assert history[0].due_date == first_due
 
         service.update_status(root, TaskStatus.COMPLETED)
         db.refresh(root)
 
         assert root.status == TaskStatus.PENDING
-        assert root.due_date == date(2026, 4, 22)
-        assert root.assignment_date == date(2026, 4, 22)
+        assert root.due_date == first_due + timedelta(weeks=2)
+        assert root.assignment_date == first_due + timedelta(weeks=2)
 
         history = RecurringTaskService(db).get_history(root.id)
         assert [item.due_date for item in reversed(history)] == [
-            date(2026, 4, 8),
-            date(2026, 4, 16),
+            first_due,
+            blocked_due + timedelta(days=1),
         ]
     finally:
         db.close()
-
 
 def test_weekly_recurring_task_skip_blocked_day_counts_skipped_occurrence_once():
     db = SessionLocal()
@@ -403,18 +407,20 @@ def test_weekly_recurring_task_skip_blocked_day_counts_skipped_occurrence_once()
         token = uuid4().hex[:8]
         creator = _create_user(db, f"phase3-creator8b-{token}@example.com", 10)
         assignee = _create_user(db, f"phase3-assignee8b-{token}@example.com", 10)
+        first_due = date.today() + timedelta(days=7)
+        blocked_due = first_due + timedelta(weeks=1)
         scheduling = SchedulingService(db)
         scheduling.add_away_period(
             user_id=assignee.id,
-            start_date=date(2026, 4, 15),
-            end_date=date(2026, 4, 15),
-            note="Away on Wednesday",
+            start_date=blocked_due,
+            end_date=blocked_due,
+            note="Away on recurring day",
         )
 
         payload = TaskCreate(
             title="Weekly recycling",
             description="Put recycling out",
-            due_date=date(2026, 4, 8),
+            due_date=first_due,
             effort_level=EffortLevel.LOW,
             ai_suggested_level=EffortLevel.LOW,
             ai_confidence=0.7,
@@ -436,14 +442,13 @@ def test_weekly_recurring_task_skip_blocked_day_counts_skipped_occurrence_once()
 
         recurring = RecurringTaskService(db)
         assert root.status == TaskStatus.PENDING
-        assert root.due_date == date(2026, 4, 22)
-        assert root.assignment_date == date(2026, 4, 22)
+        assert root.due_date == first_due + timedelta(weeks=2)
+        assert root.assignment_date == first_due + timedelta(weeks=2)
         assert root.recurrence_occurrence_index == 2
         assert recurring.remaining_count_limit_occurrences(root) == 2
-        assert recurring.preview_next_occurrence(root)["due_date"] == date(2026, 4, 29)
+        assert recurring.preview_next_occurrence(root)["due_date"] == first_due + timedelta(weeks=3)
     finally:
         db.close()
-
 
 def test_recurring_sync_removes_legacy_future_occurrences():
     db = SessionLocal()
@@ -488,11 +493,15 @@ def test_editing_recurring_task_preserves_progress_and_remaining_count_limit():
         _ensure_effort_config(db)
         token = uuid4().hex[:8]
         creator = _create_user(db, f"phase3-creator10-{token}@example.com", 10)
+        initial_due = date.today() + timedelta(days=7)
+        current_due = initial_due + timedelta(weeks=4)
+        edited_due = current_due + timedelta(days=3)
+        next_due = edited_due + timedelta(weeks=1)
 
         payload = TaskCreate(
             title="Shift recurring weekday",
             description="Recurring edit coverage",
-            due_date=date(2026, 4, 6),
+            due_date=initial_due,
             effort_level=EffortLevel.LOW,
             ai_suggested_level=EffortLevel.LOW,
             ai_confidence=0.7,
@@ -507,7 +516,7 @@ def test_editing_recurring_task_preserves_progress_and_remaining_count_limit():
         )
         root = TaskService(db).create_unassigned_task(payload, creator)
 
-        root.due_date = date(2026, 5, 4)
+        root.due_date = current_due
         root.recurrence_occurrence_index = 4
         db.add(root)
         db.commit()
@@ -519,7 +528,7 @@ def test_editing_recurring_task_preserves_progress_and_remaining_count_limit():
             TaskUpdate(
                 title=root.title,
                 description=root.description,
-                due_date=date(2026, 5, 7),
+                due_date=edited_due,
                 effort_level=root.effort_level,
                 status=root.status,
                 recurrence_pattern="weekly",
@@ -527,19 +536,18 @@ def test_editing_recurring_task_preserves_progress_and_remaining_count_limit():
                 recurrence_count_limit=10,
                 recurrence_blocked_behavior="skip",
             ),
-            recurrence_series_due_date=date(2026, 5, 14),
+            recurrence_series_due_date=next_due,
         )
         db.refresh(root)
 
         recurring = RecurringTaskService(db)
-        assert root.due_date == date(2026, 5, 7)
-        assert root.recurrence_anchor_date == date(2026, 4, 9)
+        assert root.due_date == edited_due
+        assert root.recurrence_anchor_date == edited_due - timedelta(weeks=4)
         assert recurring.current_occurrence_index(root) == 4
         assert recurring.remaining_count_limit_occurrences(root) == 6
-        assert recurring.preview_next_occurrence(root)["due_date"] == date(2026, 5, 14)
+        assert recurring.preview_next_occurrence(root)["due_date"] == next_due
     finally:
         db.close()
-
 
 def test_rescheduling_current_recurring_occurrence_does_not_move_future_series():
     db = SessionLocal()
@@ -547,11 +555,13 @@ def test_rescheduling_current_recurring_occurrence_does_not_move_future_series()
         _ensure_effort_config(db)
         token = uuid4().hex[:8]
         creator = _create_user(db, f"phase3-creator11-{token}@example.com", 10)
+        initial_due = date.today() + timedelta(days=7)
+        current_due = initial_due + timedelta(weeks=4)
 
         payload = TaskCreate(
             title="Recurring one-off move",
             description="Current occurrence scheduling coverage",
-            due_date=date(2026, 4, 6),
+            due_date=initial_due,
             effort_level=EffortLevel.LOW,
             ai_suggested_level=EffortLevel.LOW,
             ai_confidence=0.7,
@@ -565,19 +575,24 @@ def test_rescheduling_current_recurring_occurrence_does_not_move_future_series()
             recurrence_blocked_behavior="skip",
         )
         root = TaskService(db).create_unassigned_task(payload, creator)
-        root.due_date = date(2026, 5, 4)
+        root.due_date = current_due
         root.recurrence_occurrence_index = 4
         db.add(root)
         db.commit()
         db.refresh(root)
 
         service = TaskService(db)
-        service.update_task_schedule(root, due_date=date(2026, 5, 6), assignee_id=None, assignment_date=None)
+        service.update_task_schedule(
+            root,
+            due_date=current_due + timedelta(days=2),
+            assignee_id=None,
+            assignment_date=None,
+        )
         db.refresh(root)
 
         recurring = RecurringTaskService(db)
-        assert root.due_date == date(2026, 5, 6)
+        assert root.due_date == current_due + timedelta(days=2)
         assert recurring.current_occurrence_index(root) == 4
-        assert recurring.preview_next_occurrence(root)["due_date"] == date(2026, 5, 11)
+        assert recurring.preview_next_occurrence(root)["due_date"] == initial_due + timedelta(weeks=5)
     finally:
         db.close()

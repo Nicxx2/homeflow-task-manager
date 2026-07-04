@@ -1,0 +1,24 @@
+<div class="mt-3">
+  <div class="mb-1 flex items-center gap-2">
+    <label for="recurrence_late_behavior" class="text-sm">After a late completion</label>
+    <details class="relative" data-help-popover>
+      <summary
+        class="app-outline-accent flex h-6 w-6 cursor-pointer list-none items-center justify-center rounded-full text-xs font-semibold"
+        aria-label="Explain late completion options"
+        title="About late completions"
+      >?</summary>
+      <div class="app-surface absolute right-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg border p-3 text-xs leading-5 shadow-xl">
+        <p><strong>Keep original schedule</strong> skips missed dates and preserves the repeating calendar.</p>
+        <p class="mt-2"><strong>Repeat from completion date</strong> starts the next interval from the day this task is completed.</p>
+      </div>
+    </details>
+  </div>
+  <select
+    id="recurrence_late_behavior"
+    name="recurrence_late_behavior"
+    class="app-select w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+  >
+    <option value="keep_schedule" {% if form_values.recurrence_late_behavior == "keep_schedule" %}selected{% endif %}>Keep original schedule</option>
+    <option value="from_completion" {% if form_values.recurrence_late_behavior == "from_completion" %}selected{% endif %}>Repeat from completion date</option>
+  </select>
+</div>

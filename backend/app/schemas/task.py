@@ -21,6 +21,7 @@ class TaskCreate(BaseModel):
     recurrence_until: date | None = None
     recurrence_count_limit: int | None = None
     recurrence_blocked_behavior: str | None = None
+    recurrence_late_behavior: str | None = None
 
     @field_validator("recurrence_interval_weeks", "recurrence_count_limit")
     @classmethod
@@ -41,6 +42,13 @@ class TaskCreate(BaseModel):
     def recurrence_blocked_behavior_must_be_supported(cls, value: str | None) -> str | None:
         if value is not None and value not in {"skip", "move_same_week"}:
             raise ValueError("Invalid recurring blocked-date behavior.")
+        return value
+
+    @field_validator("recurrence_late_behavior")
+    @classmethod
+    def recurrence_late_behavior_must_be_supported(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"keep_schedule", "from_completion"}:
+            raise ValueError("Invalid late-completion behavior.")
         return value
 
     @field_validator("title")
@@ -68,6 +76,7 @@ class TaskUpdate(BaseModel):
     recurrence_until: date | None = None
     recurrence_count_limit: int | None = None
     recurrence_blocked_behavior: str | None = None
+    recurrence_late_behavior: str | None = None
 
     @field_validator("recurrence_interval_weeks", "recurrence_count_limit")
     @classmethod
@@ -88,6 +97,13 @@ class TaskUpdate(BaseModel):
     def recurrence_blocked_behavior_must_be_supported(cls, value: str | None) -> str | None:
         if value is not None and value not in {"skip", "move_same_week"}:
             raise ValueError("Invalid recurring blocked-date behavior.")
+        return value
+
+    @field_validator("recurrence_late_behavior")
+    @classmethod
+    def recurrence_late_behavior_must_be_supported(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"keep_schedule", "from_completion"}:
+            raise ValueError("Invalid late-completion behavior.")
         return value
 
     @field_validator("title")
@@ -138,6 +154,7 @@ class TaskRead(BaseModel):
     recurrence_until: date | None = None
     recurrence_count_limit: int | None = None
     recurrence_blocked_behavior: str | None = None
+    recurrence_late_behavior: str | None = None
     recurrence_parent_id: int | None = None
     recurrence_anchor_date: date | None = None
 

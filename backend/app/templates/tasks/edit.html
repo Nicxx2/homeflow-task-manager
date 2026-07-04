@@ -16,6 +16,9 @@
   onsubmit="return appValidateScheduleForm(this)"
 >
   <input type="hidden" name="redirect_to" value="{{ redirect_to }}" />
+  {% if task.recurrence_pattern == "weekly" and task.recurrence_parent_id is none %}
+    <input type="hidden" name="expected_recurrence_index" value="{{ task.recurrence_occurrence_index or 0 }}" />
+  {% endif %}
   {% if form_error %}
     <div class="rounded-md bg-red-50 border border-red-100 text-red-700 px-3 py-2 text-sm">{{ form_error }}</div>
   {% endif %}
@@ -239,6 +242,7 @@
           <option value="move_same_week" {% if form_values.recurrence_blocked_behavior == "move_same_week" %}selected{% endif %}>Move to the next allowed day in the same week</option>
         </select>
       </label>
+      {% include "tasks/partials/recurrence_late_behavior.html" %}
     </div>
   </details>
   {% endif %}

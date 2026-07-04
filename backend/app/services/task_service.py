@@ -46,6 +46,7 @@ class TaskService:
             recurrence_until=payload.recurrence_until,
             recurrence_count_limit=payload.recurrence_count_limit,
             recurrence_blocked_behavior=payload.recurrence_blocked_behavior,
+            recurrence_late_behavior=payload.recurrence_late_behavior if payload.recurrence_pattern else None,
             recurrence_anchor_date=payload.due_date if payload.recurrence_pattern else None,
             recurrence_occurrence_index=0 if payload.recurrence_pattern else None,
         )
@@ -152,6 +153,7 @@ class TaskService:
         task.recurrence_until = None
         task.recurrence_count_limit = None
         task.recurrence_blocked_behavior = None
+        task.recurrence_late_behavior = None
         task.recurrence_anchor_date = None
         task.recurrence_occurrence_index = None
 
@@ -197,6 +199,7 @@ class TaskService:
             task.recurrence_until = payload.recurrence_until
             task.recurrence_count_limit = payload.recurrence_count_limit
             task.recurrence_blocked_behavior = payload.recurrence_blocked_behavior
+            task.recurrence_late_behavior = payload.recurrence_late_behavior if payload.recurrence_pattern else None
             task.recurrence_anchor_date = self._updated_recurrence_anchor_date(
                 task=task,
                 payload=payload,
@@ -215,13 +218,22 @@ class TaskService:
         self.db.refresh(task)
         return task
 
-    def update_status(self, task: Task, status: TaskStatus) -> Task:
+    def update_status(
+        self,
+        task: Task,
+        status: TaskStatus,
+        *,
+        expected_recurrence_index: int | None = None,
+    ) -> Task:
         if (
             task.recurrence_pattern == "weekly"
             and task.recurrence_parent_id is None
             and status == TaskStatus.COMPLETED
         ):
-            return RecurringTaskService(self.db).complete_occurrence(task)
+            return RecurringTaskService(self.db).complete_occurrence(
+                task,
+                expected_occurrence_index=expected_recurrence_index,
+            )
         if self._is_recurring_occurrence_copy(task) and status != TaskStatus.COMPLETED:
             self._clear_recurrence_metadata(task)
         task.status = status

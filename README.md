@@ -196,7 +196,16 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.5.4
+## What is new in v2.6.0
+
+- New web Planner view for week and month planning, with quick task moves and a mobile-friendly date picker flow.
+- Planner capacity checks protect shared schedules, so team tasks cannot be moved into a full day unless the rules allow it.
+- Users can explicitly add extra capacity for their own over-capacity Planner moves after reviewing the change.
+- Recurring tasks now support clearer late-completion behavior, including continuing from the original schedule or from the completion date.
+- Overdue recurring tasks now advance cleanly to the next valid future occurrence instead of creating catch-up tasks in the past.
+- Planner and recurring-task edge cases now include safer stale-confirmation, away-day, blocked-date, completed-task, and permission checks.
+
+### Also added in v2.5.4
 
 - Web Easy Logon lets a trusted browser remember one approved profile per device, with a rolling 30-day expiry and a remove option.
 - Web admins can optionally allow approved members to update visible task statuses while keeping edit, delete, assignment, and schedule controls unchanged.
@@ -221,6 +230,7 @@ If someone is away or has blocked days
 
 - Effort-based planning with daily workload protection
 - Automatic next-available scheduling suggestions
+- Planner view for fast weekly and monthly schedule changes
 - Quick status changes from list and day views
 - Familiar create and edit flows for assignment planning
 - Recurring task support with one active occurrence instead of cluttering the task list
@@ -235,6 +245,7 @@ The app is designed to plan around real-life availability, not just due dates.
 - prevents assignment to past dates
 - avoids blocked weekdays and away periods
 - checks daily capacity before assigning work
+- protects shared schedule changes with Planner capacity checks
 - suggests the next valid day when the chosen one does not fit
 - allows controlled override only when the rules permit it
 
@@ -254,6 +265,7 @@ Recurring tasks stay cleaner than a typical task app.
 - one active recurring task stays visible
 - completed occurrences move into history
 - the next active occurrence is prepared automatically
+- late completions can continue from the original schedule or from the completion date
 - blocked dates can be skipped or moved within the same week based on the chosen rule
 
 ### Personal customization

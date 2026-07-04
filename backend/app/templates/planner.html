@@ -1,0 +1,702 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro planner_task(task, compact=false) %}
+  {% set can_move_task = user.is_admin or task.assignee_id == user.id %}
+  {% set movable = task.status.value != "completed" and not task.recurrence_parent_id and can_move_task %}
+  <div
+    class="planner-task {% if compact %}planner-task-compact hidden sm:block{% endif %} {% if task.status.value == 'completed' %}opacity-60{% elif task.status.value == 'in_progress' %}app-status-progress{% else %}app-surface{% endif %} {% if task.personal_highlight_color %}app-task-highlight{% endif %} rounded-md border px-2.5 py-2"
+    data-planner-task
+    data-task-id="{{ task.id }}"
+    data-movable="{{ 'true' if movable else 'false' }}"
+    {% if movable %}draggable="true" tabindex="0"{% endif %}
+    {% if task.personal_highlight_color %}style="--task-highlight: {{ task.personal_highlight_color }};"{% endif %}
+  >
+    <div class="flex items-start gap-2">
+      {% if movable %}
+      <input
+        type="checkbox"
+        class="planner-task-checkbox mt-0.5 h-4 w-4 shrink-0"
+        value="{{ task.id }}"
+        aria-label="Select {{ task.title }}"
+      />
+      {% elif task.status.value == "completed" %}
+      <span class="mt-0.5 h-4 w-4 shrink-0 text-center text-xs text-slate-400" title="Completed">&#10003;</span>
+      {% else %}
+      <span class="mt-0.5 h-4 w-4 shrink-0 text-center text-xs text-slate-400" title="Only the assignee or an admin can move this task">&#8722;</span>
+      {% endif %}
+      <div class="min-w-0 flex-1">
+        <a
+          href="/tasks/{{ task.id }}?return_to={{ current_page_return_to }}"
+          class="app-task-title block truncate text-xs font-medium hover:underline"
+          title="{{ task.title }}"
+          data-planner-title-trigger
+          data-planner-title="{{ task.title }}"
+        >{{ task.title }}</a>
+        <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+          <span>{{ task.points_value }} pts</span>
+          {% if scope == "team" and task.assignee %}<span>{{ task.assignee.full_name }}</span>{% endif %}
+          {% if task.recurrence_pattern == "weekly" and not task.recurrence_parent_id %}<span class="app-recurring-badge rounded-full px-1.5 py-0.5">Repeats</span>{% endif %}
+          {% if task.status.value == "in_progress" %}<span>In progress</span>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
+
+<style>
+  .planner-drop-active {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 2px;
+    background: color-mix(in srgb, var(--app-accent) 9%, var(--app-surface));
+  }
+  .planner-task-selected {
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent) 18%, transparent);
+  }
+  .planner-drag-ghost {
+    position: fixed;
+    z-index: 80;
+    pointer-events: none;
+    transform: translate(12px, 12px);
+  }
+  .planner-capacity-open { border-top-color: #10b981; }
+  .planner-capacity-near { border-top-color: #f59e0b; }
+  .planner-capacity-full, .planner-capacity-over { border-top-color: #ef4444; }
+  .planner-capacity-blocked, .planner-capacity-unset, .planner-capacity-past { border-top-color: #94a3b8; }
+  [data-planner-task][data-movable="true"] { touch-action: pan-y; }
+  [data-planner-title-trigger] { -webkit-touch-callout: none; }
+  .planner-title-tooltip {
+    position: fixed;
+    z-index: 90;
+    max-width: min(22rem, calc(100vw - 2rem));
+    pointer-events: none;
+    white-space: normal;
+  }
+  @media (max-width: 639px) {
+    [data-planner-root].planner-has-selection { padding-bottom: 20rem; }
+    [data-planner-selection-bar] { max-height: min(17rem, calc(100vh - 2rem)); overflow-y: auto; }
+    body.planner-selection-active #assistant-toggle,
+    body.planner-selection-active #assistant-panel { display: none !important; }
+  }
+</style>
+
+<section
+  data-planner-root
+  data-today="{{ today.isoformat() }}"
+  data-scope="{{ scope }}"
+  data-filter-query="{{ filter_query }}"
+  {% if selected_member_id %}data-selected-member-id="{{ selected_member_id }}"{% endif %}
+  class="pb-24"
+>
+  <header class="density-header mb-5">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold">Planner</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Move planned work while keeping capacity protected.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <a
+          href="/planner?view={{ view }}&start={{ previous_anchor.isoformat() }}&{{ filter_query }}"
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+        >Previous</a>
+        <a
+          href="/planner?view={{ view }}&{{ filter_query }}"
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+        >Today</a>
+        <a
+          href="/planner?view={{ view }}&start={{ next_anchor.isoformat() }}&{{ filter_query }}"
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+        >Next</a>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <h2 class="text-lg font-medium">{{ label }}</h2>
+      <div class="flex flex-wrap gap-2">
+        <div class="flex rounded-md border border-slate-300 p-0.5 dark:border-slate-700">
+          <a href="/planner?view=week&start={{ navigation_anchor.isoformat() }}&{{ filter_query }}" class="rounded px-3 py-1.5 text-sm {% if view == 'week' %}app-tab-active{% endif %}">Week</a>
+          <a href="/planner?view=month&start={{ month_navigation_anchor.isoformat() }}&{{ filter_query }}" class="rounded px-3 py-1.5 text-sm {% if view == 'month' %}app-tab-active{% endif %}">Month</a>
+        </div>
+        <div class="flex rounded-md border border-slate-300 p-0.5 dark:border-slate-700">
+          <a href="/planner?view={{ view }}&start={{ navigation_anchor.isoformat() }}&scope=mine" class="rounded px-3 py-1.5 text-sm {% if scope == 'mine' %}app-tab-active{% endif %}">Mine</a>
+          <a href="/planner?view={{ view }}&start={{ navigation_anchor.isoformat() }}&scope=team" class="rounded px-3 py-1.5 text-sm {% if scope == 'team' %}app-tab-active{% endif %}">Everyone</a>
+        </div>
+        <form method="get" action="/planner" class="flex items-center gap-2">
+          <input type="hidden" name="view" value="{{ view }}" />
+          <input type="hidden" name="start" value="{{ navigation_anchor.isoformat() }}" />
+          <input type="hidden" name="scope" value="member" />
+          <label for="planner-member-filter" class="sr-only">Planner member</label>
+          <select
+            id="planner-member-filter"
+            name="member_id"
+            class="app-select max-w-44 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+            onchange="if (this.value) this.form.submit();"
+          >
+            <option value="">Member</option>
+            {% for member in visible_members %}
+            <option value="{{ member.id }}" {% if selected_member_id == member.id %}selected{% endif %}>{{ member.full_name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  {% if view == "week" %}
+  <div class="mb-3 grid grid-cols-7 gap-1 md:hidden" aria-label="Choose planner day">
+    {% for day in days %}
+    <button
+      type="button"
+      data-planner-mobile-day
+      data-planner-drop-date="{{ day.date.isoformat() }}"
+      class="planner-capacity-{{ day.tone }} min-w-0 rounded-md border border-t-4 px-1 py-2 text-center {% if day.date == active_mobile_date %}app-tab-active{% else %}app-surface{% endif %}"
+      aria-label="{{ day.date.strftime('%A %d %B') }}"
+    >
+      <span class="block text-[10px] uppercase">{{ day.date.strftime('%a') }}</span>
+      <span class="block text-sm font-semibold">{{ day.date.day }}</span>
+      <span class="mt-0.5 block text-[9px] text-slate-500 dark:text-slate-400">{% if day.capacity is none %}{{ day.points }} pts{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}</span>
+    </button>
+    {% endfor %}
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-7 md:gap-2">
+    {% for day in days %}
+    <article
+      data-planner-day-column="{{ day.date.isoformat() }}"
+      data-planner-drop-date="{{ day.date.isoformat() }}"
+      class="planner-capacity-{{ day.tone }} {% if day.date != active_mobile_date %}hidden{% endif %} app-surface min-h-64 flex-col rounded-md border border-t-4 p-3 md:flex"
+    >
+      <div class="mb-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <p class="text-xs uppercase text-slate-500 dark:text-slate-400">{{ day.date.strftime('%a') }}</p>
+            <p class="font-semibold {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }} {{ day.date.strftime('%b') }}</p>
+          </div>
+          <span class="text-[10px] text-slate-500 dark:text-slate-400">
+            {% if day.capacity is none %}{{ day.points }} pts{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}
+          </span>
+        </div>
+        {% if scope == "team" %}
+        <div class="mt-2 space-y-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+          {% for row in day.member_rows %}
+          <p class="truncate">{{ row.member.full_name }}: {{ row.points }}/{{ row.capacity if row.capacity is not none else "-" }}{% if row.schedule_block %} &middot; {{ row.schedule_block.message }}{% endif %}</p>
+          {% endfor %}
+        </div>
+        {% elif day.member_rows and day.member_rows[0].schedule_block %}
+        <p class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">{{ day.member_rows[0].schedule_block.message }}</p>
+        {% endif %}
+      </div>
+
+      <div class="space-y-2">
+        {% for task in day.tasks %}
+          {{ planner_task(task) }}
+        {% else %}
+        <p class="rounded-md border border-dashed border-slate-300 px-2 py-4 text-center text-[11px] text-slate-400 dark:border-slate-700">No tasks</p>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] uppercase text-slate-500 dark:text-slate-400">
+    {% for weekday in weekday_labels %}<span>{{ weekday }}</span>{% endfor %}
+  </div>
+  <div class="grid grid-cols-7 gap-1">
+    {% for day in days %}
+    <article
+      data-planner-drop-date="{{ day.date.isoformat() }}"
+      class="planner-capacity-{{ day.tone }} app-surface min-h-24 rounded-md border border-t-4 p-1.5 {% if day.date.month != focus_month %}opacity-50{% endif %} sm:min-h-32 sm:p-2"
+    >
+      <div class="flex items-center justify-between gap-1">
+        <span class="text-xs font-semibold {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }}</span>
+        <span class="text-[9px] text-slate-500 dark:text-slate-400">{% if day.capacity is none %}{{ day.points }}{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}</span>
+      </div>
+      <p class="mt-2 text-[9px] text-slate-500 dark:text-slate-400 sm:hidden">{{ day.tasks|length }} task{{ "" if day.tasks|length == 1 else "s" }}</p>
+      <div class="mt-1 space-y-1">
+        {% for task in day.tasks %}
+          {% if loop.index <= 3 %}{{ planner_task(task, true) }}{% endif %}
+        {% endfor %}
+        {% if day.tasks|length > 3 %}
+        <p class="text-[9px] text-slate-500 dark:text-slate-400">+{{ day.tasks|length - 3 }} more</p>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div
+    data-planner-selection-bar
+    class="app-surface fixed inset-x-3 bottom-3 z-50 hidden border p-3 shadow-2xl sm:bottom-5 sm:left-1/2 sm:right-auto sm:w-[38rem] sm:-translate-x-1/2 sm:rounded-lg"
+  >
+    <div class="flex flex-col gap-3">
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium"><span data-planner-selected-count>0</span> selected</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400"><span class="hidden sm:inline">Drag the selection to a date, or choose one here.</span><span class="sm:hidden">Choose a destination day below.</span></p>
+        </div>
+        <button type="button" data-planner-clear class="rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700">Clear</button>
+      </div>
+      <div class="sm:hidden">
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Move to</p>
+          <div class="flex gap-1">
+            <button type="button" data-planner-date-scroll="-1" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" aria-label="Show earlier destination dates">&lt;</button>
+            <button type="button" data-planner-date-scroll="1" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" aria-label="Show later destination dates">&gt;</button>
+          </div>
+        </div>
+        <div data-planner-date-strip class="flex gap-2 overflow-x-auto pb-1" aria-label="Choose move date">
+          {% for day in mobile_destination_days %}
+          <button
+            type="button"
+            data-planner-date-choice
+            data-assignment-date="{{ day.date.isoformat() }}"
+            class="planner-capacity-{{ day.tone }} app-surface min-w-[5rem] rounded-md border border-t-4 px-2 py-2 text-left disabled:opacity-40"
+            {% if day.is_past %}disabled aria-disabled="true"{% endif %}
+          >
+            <span class="block text-[10px] uppercase text-slate-500 dark:text-slate-400">{{ day.date.strftime('%a') }}</span>
+            <span class="block text-sm font-semibold {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }} {{ day.date.strftime('%b') }}</span>
+            <span class="block text-[10px] text-slate-500 dark:text-slate-400">{% if day.capacity is none %}{{ day.points }} pts{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      <form data-planner-move-form class="flex items-center gap-2">
+        <input type="date" min="{{ today.isoformat() }}" name="assignment_date" class="app-input min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-800" required />
+        <button type="submit" class="app-primary-button rounded-md px-3 py-2 text-sm">Review</button>
+      </form>
+    </div>
+  </div>
+
+  <p data-planner-live class="sr-only" aria-live="polite"></p>
+  <div data-planner-title-tooltip class="planner-title-tooltip app-surface hidden rounded-md border px-3 py-2 text-xs shadow-xl"></div>
+</section>
+
+<div data-planner-modal class="fixed inset-0 z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="planner-modal-title">
+  <button type="button" data-planner-modal-close class="absolute inset-0 bg-slate-950/60" aria-label="Close move review"></button>
+  <section class="app-surface relative z-10 w-full max-w-md rounded-lg border p-5 shadow-2xl">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <h2 id="planner-modal-title" class="text-lg font-semibold">Review move</h2>
+        <p data-planner-modal-message class="mt-1 text-sm text-slate-500 dark:text-slate-400">Checking capacity...</p>
+      </div>
+      <button type="button" data-planner-modal-close class="rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700">Close</button>
+    </div>
+    <div data-planner-modal-summary class="mt-4 space-y-2"></div>
+    <div data-planner-modal-warnings class="mt-3 space-y-1 text-xs text-amber-700 dark:text-amber-300"></div>
+    <div data-planner-modal-errors class="mt-3 space-y-1 text-xs text-red-700 dark:text-red-300"></div>
+    <div class="mt-5 flex flex-wrap justify-end gap-2">
+      <button type="button" data-planner-modal-cancel class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">Cancel</button>
+      <button type="button" data-planner-confirm-extra class="hidden rounded-md border border-amber-300 px-4 py-2 text-sm text-amber-800 dark:border-amber-700 dark:text-amber-200" disabled>Add extra capacity</button>
+      <button type="button" data-planner-confirm class="app-primary-button rounded-md px-4 py-2 text-sm" disabled>Confirm move</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(function initPlanner() {
+  const root = document.querySelector("[data-planner-root]");
+  if (!root) return;
+
+  const selected = new Set();
+  const toolbar = root.querySelector("[data-planner-selection-bar]");
+  const selectedCount = root.querySelector("[data-planner-selected-count]");
+  const live = root.querySelector("[data-planner-live]");
+  const modal = document.querySelector("[data-planner-modal]");
+  const titleTooltip = root.querySelector("[data-planner-title-tooltip]");
+  const modalMessage = modal.querySelector("[data-planner-modal-message]");
+  const modalSummary = modal.querySelector("[data-planner-modal-summary]");
+  const modalWarnings = modal.querySelector("[data-planner-modal-warnings]");
+  const modalErrors = modal.querySelector("[data-planner-modal-errors]");
+  const confirmButton = modal.querySelector("[data-planner-confirm]");
+  const confirmExtraButton = modal.querySelector("[data-planner-confirm-extra]");
+  let preview = null;
+  let pending = false;
+  let activeDropTarget = null;
+
+  function taskCards() {
+    return Array.from(root.querySelectorAll("[data-planner-task]"));
+  }
+
+  function updateSelection(message) {
+    taskCards().forEach(function(card) {
+      const id = Number(card.dataset.taskId);
+      const checked = selected.has(id);
+      card.classList.toggle("planner-task-selected", checked);
+      const checkbox = card.querySelector(".planner-task-checkbox");
+      if (checkbox) checkbox.checked = checked;
+    });
+    selectedCount.textContent = String(selected.size);
+    toolbar.classList.toggle("hidden", selected.size === 0);
+    root.classList.toggle("planner-has-selection", selected.size > 0);
+    document.body.classList.toggle("planner-selection-active", selected.size > 0);
+    if (message) live.textContent = message;
+  }
+
+  function selectTask(card) {
+    if (!card || card.dataset.movable !== "true") return;
+    selected.add(Number(card.dataset.taskId));
+    updateSelection(selected.size + " task" + (selected.size === 1 ? "" : "s") + " selected.");
+  }
+
+  function clearSelection() {
+    selected.clear();
+    updateSelection("Selection cleared.");
+  }
+
+  function clearDropTarget() {
+    if (activeDropTarget) activeDropTarget.classList.remove("planner-drop-active");
+    activeDropTarget = null;
+  }
+
+  function setDropTarget(target) {
+    if (target === activeDropTarget) return;
+    clearDropTarget();
+    activeDropTarget = target;
+    if (activeDropTarget) activeDropTarget.classList.add("planner-drop-active");
+  }
+
+  function hideTitleTooltip() {
+    if (!titleTooltip) return;
+    titleTooltip.classList.add("hidden");
+    titleTooltip.textContent = "";
+  }
+
+  function showTitleTooltip(trigger) {
+    if (!titleTooltip || !trigger) return;
+    const text = trigger.dataset.plannerTitle || trigger.textContent.trim();
+    if (!text) return;
+    titleTooltip.textContent = text;
+    titleTooltip.classList.remove("hidden");
+    const rect = trigger.getBoundingClientRect();
+    const tooltipRect = titleTooltip.getBoundingClientRect();
+    const margin = 8;
+    let top = rect.top - tooltipRect.height - margin;
+    if (top < margin) top = rect.bottom + margin;
+    let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+    left = Math.max(margin, Math.min(left, window.innerWidth - tooltipRect.width - margin));
+    titleTooltip.style.left = left + "px";
+    titleTooltip.style.top = top + "px";
+  }
+
+  function setModalOpen(open) {
+    modal.classList.toggle("hidden", !open);
+    modal.classList.toggle("flex", open);
+    if (!open) {
+      preview = null;
+      confirmButton.disabled = true;
+      confirmExtraButton.disabled = true;
+      confirmExtraButton.classList.add("hidden");
+    }
+  }
+
+  function addMessage(container, text) {
+    const item = document.createElement("p");
+    item.textContent = text;
+    container.appendChild(item);
+  }
+
+  async function readJson(response) {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error(response.status === 401 ? "Your session expired. Reload and sign in again." : "The server returned an unexpected response.");
+    }
+    return response.json();
+  }
+
+  async function reviewMove(assignmentDate) {
+    if (!selected.size || pending) return;
+    pending = true;
+    preview = null;
+    modalMessage.textContent = "Checking capacity...";
+    modalSummary.replaceChildren();
+    modalWarnings.replaceChildren();
+    modalErrors.replaceChildren();
+    confirmButton.disabled = true;
+    confirmExtraButton.disabled = true;
+    confirmExtraButton.classList.add("hidden");
+    confirmExtraButton.textContent = "Add extra capacity";
+    setModalOpen(true);
+
+    hideTitleTooltip();
+    try {
+      const response = await fetch("/planner/move/preview", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          task_ids: Array.from(selected),
+          assignment_date: assignmentDate
+        })
+      });
+      const payload = await readJson(response);
+      preview = payload;
+      modalMessage.textContent = payload.message || "Move review ready.";
+
+      (payload.members || []).forEach(function(member) {
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700";
+        const name = document.createElement("span");
+        name.textContent = member.name;
+        const capacity = document.createElement("span");
+        capacity.className = "text-xs text-slate-500 dark:text-slate-400";
+        if (member.capacity == null) {
+          capacity.textContent = member.projected_points + " pts - capacity unset";
+        } else if (member.remaining < 0) {
+          capacity.textContent = member.projected_points + " / " + member.capacity + " pts - " + Math.abs(member.remaining) + " over";
+        } else {
+          capacity.textContent = member.projected_points + " / " + member.capacity + " pts - " + member.remaining + " left";
+        }
+        row.append(name, capacity);
+        modalSummary.appendChild(row);
+      });
+      (payload.warnings || []).forEach(function(item) { addMessage(modalWarnings, item); });
+      if (payload.can_add_extra_capacity && payload.extra_capacity_required > 0) {
+        addMessage(modalWarnings, "Adds " + payload.extra_capacity_required + " extra capacity point" + (payload.extra_capacity_required === 1 ? "" : "s") + " to this day.");
+        confirmExtraButton.textContent = "Add " + payload.extra_capacity_required + " extra pts";
+        confirmExtraButton.classList.remove("hidden");
+        confirmExtraButton.disabled = false;
+      }
+      (payload.errors || []).forEach(function(item) { addMessage(modalErrors, item); });
+      confirmButton.disabled = !payload.ok;
+    } catch (error) {
+      modalMessage.textContent = "The move could not be checked.";
+      addMessage(modalErrors, error.message || "Check your connection and try again.");
+    } finally {
+      pending = false;
+    }
+  }
+
+  async function confirmMove(addExtraCapacity) {
+    const canAddExtraCapacity = Boolean(addExtraCapacity && preview && preview.can_add_extra_capacity);
+    if (!preview || pending || (!preview.ok && !canAddExtraCapacity)) return;
+    pending = true;
+    confirmButton.disabled = true;
+    confirmExtraButton.disabled = true;
+    const activeButton = canAddExtraCapacity ? confirmExtraButton : confirmButton;
+    activeButton.textContent = canAddExtraCapacity ? "Adding..." : "Moving...";
+    try {
+      const response = await fetch("/planner/move/commit", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          task_ids: Array.from(selected),
+          assignment_date: preview.assignment_date,
+          fingerprint: preview.fingerprint,
+          add_extra_capacity: canAddExtraCapacity
+        })
+      });
+      const payload = await readJson(response);
+      if (!response.ok || !payload.ok) {
+        modalMessage.textContent = payload.message || "The move could not be saved.";
+        modalErrors.replaceChildren();
+        (payload.errors || []).forEach(function(item) { addMessage(modalErrors, item); });
+        preview = null;
+        return;
+      }
+      modalMessage.textContent = payload.message;
+      window.location.reload();
+    } catch (error) {
+      modalMessage.textContent = "The move could not be saved.";
+      modalErrors.replaceChildren();
+      addMessage(modalErrors, error.message || "Check your connection and try again.");
+    } finally {
+      pending = false;
+      confirmButton.textContent = "Confirm move";
+      if (preview && preview.can_add_extra_capacity && preview.extra_capacity_required > 0) {
+        confirmExtraButton.textContent = "Add " + preview.extra_capacity_required + " extra pts";
+        confirmExtraButton.disabled = false;
+      } else {
+        confirmExtraButton.textContent = "Add extra capacity";
+      }
+      if (preview && preview.ok) confirmButton.disabled = false;
+    }
+  }
+
+  root.querySelectorAll("[data-planner-title-trigger]").forEach(function(trigger) {
+    let tooltipTimer = null;
+    let suppressNextClick = false;
+
+    trigger.addEventListener("mouseenter", function() { showTitleTooltip(trigger); });
+    trigger.addEventListener("mouseleave", hideTitleTooltip);
+    trigger.addEventListener("focus", function() { showTitleTooltip(trigger); });
+    trigger.addEventListener("blur", hideTitleTooltip);
+    trigger.addEventListener("pointerdown", function(event) {
+      if (event.pointerType === "mouse") return;
+      tooltipTimer = window.setTimeout(function() {
+        suppressNextClick = true;
+        showTitleTooltip(trigger);
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, 550);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(function(eventName) {
+      trigger.addEventListener(eventName, function() {
+        window.clearTimeout(tooltipTimer);
+        if (suppressNextClick) {
+          window.setTimeout(function() { suppressNextClick = false; }, 700);
+        }
+      });
+    });
+    trigger.addEventListener("click", function(event) {
+      if (!suppressNextClick) return;
+      event.preventDefault();
+      event.stopPropagation();
+      suppressNextClick = false;
+    });
+    trigger.addEventListener("contextmenu", function(event) {
+      if (suppressNextClick) event.preventDefault();
+    });
+  });
+
+  root.querySelectorAll(".planner-task-checkbox").forEach(function(checkbox) {
+    checkbox.addEventListener("change", function() {
+      const id = Number(checkbox.value);
+      if (checkbox.checked) selected.add(id);
+      else selected.delete(id);
+      updateSelection();
+    });
+  });
+
+  taskCards().forEach(function(card) {
+    if (card.dataset.movable !== "true") return;
+
+    card.addEventListener("dragstart", function(event) {
+      hideTitleTooltip();
+      selectTask(card);
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", Array.from(selected).join(","));
+    });
+    card.addEventListener("dragend", clearDropTarget);
+
+    let timer = null;
+    let touchActive = false;
+    let ghost = null;
+    let startX = 0;
+    let startY = 0;
+
+    card.addEventListener("pointerdown", function(event) {
+      if (event.pointerType === "mouse" || event.target.closest("input, a, button")) return;
+      startX = event.clientX;
+      startY = event.clientY;
+      timer = window.setTimeout(function() {
+        touchActive = true;
+        selectTask(card);
+        ghost = document.createElement("div");
+        ghost.className = "planner-drag-ghost app-primary-button rounded-md px-3 py-2 text-sm shadow-xl";
+        ghost.textContent = selected.size + " task" + (selected.size === 1 ? "" : "s");
+        document.body.appendChild(ghost);
+        ghost.style.left = event.clientX + "px";
+        ghost.style.top = event.clientY + "px";
+        if (navigator.vibrate) navigator.vibrate(25);
+        card.setPointerCapture(event.pointerId);
+      }, 450);
+    });
+
+    card.addEventListener("pointermove", function(event) {
+      if (!touchActive) {
+        if (Math.abs(event.clientX - startX) > 8 || Math.abs(event.clientY - startY) > 8) {
+          window.clearTimeout(timer);
+        }
+        return;
+      }
+      event.preventDefault();
+      ghost.style.left = event.clientX + "px";
+      ghost.style.top = event.clientY + "px";
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      setDropTarget(hit ? hit.closest("[data-planner-drop-date]") : null);
+    });
+
+    function finishTouch(event, shouldReview) {
+      window.clearTimeout(timer);
+      if (touchActive) {
+        event.preventDefault();
+        const target = activeDropTarget;
+        if (ghost) ghost.remove();
+        touchActive = false;
+        ghost = null;
+        clearDropTarget();
+        if (shouldReview && target) reviewMove(target.dataset.plannerDropDate);
+      }
+    }
+
+    card.addEventListener("pointerup", function(event) { finishTouch(event, true); });
+    card.addEventListener("pointercancel", function(event) { finishTouch(event, false); });
+  });
+
+  root.querySelectorAll("[data-planner-drop-date]").forEach(function(target) {
+    target.addEventListener("dragover", function(event) {
+      if (!selected.size) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget(target);
+    });
+    target.addEventListener("dragleave", function(event) {
+      if (!target.contains(event.relatedTarget)) clearDropTarget();
+    });
+    target.addEventListener("drop", function(event) {
+      event.preventDefault();
+      clearDropTarget();
+      reviewMove(target.dataset.plannerDropDate);
+    });
+    target.addEventListener("click", function(event) {
+      if (event.target.closest("[data-planner-task]")) return;
+      if (target.matches("[data-planner-mobile-day]")) {
+        root.querySelectorAll("[data-planner-mobile-day]").forEach(function(button) {
+          button.classList.toggle("app-tab-active", button === target);
+          button.classList.toggle("app-surface", button !== target);
+        });
+        root.querySelectorAll("[data-planner-day-column]").forEach(function(column) {
+          column.classList.toggle("hidden", column.dataset.plannerDayColumn !== target.dataset.plannerDropDate);
+        });
+        return;
+      }
+      if (selected.size) {
+        reviewMove(target.dataset.plannerDropDate);
+        return;
+      }
+      window.location.href = "/planner?view=week&start=" + encodeURIComponent(target.dataset.plannerDropDate) + "&" + root.dataset.filterQuery;
+    });
+  });
+
+  root.querySelectorAll("[data-planner-date-choice]").forEach(function(button) {
+    button.addEventListener("click", function() {
+      if (button.disabled) return;
+      reviewMove(button.dataset.assignmentDate);
+    });
+  });
+
+  root.querySelectorAll("[data-planner-date-scroll]").forEach(function(button) {
+    button.addEventListener("click", function() {
+      const strip = root.querySelector("[data-planner-date-strip]");
+      if (!strip) return;
+      const direction = Number(button.dataset.plannerDateScroll || 1);
+      const distance = Math.max(strip.clientWidth - 48, 120);
+      strip.scrollBy({ left: direction * distance, behavior: "smooth" });
+    });
+  });
+
+  root.querySelector("[data-planner-clear]").addEventListener("click", clearSelection);
+  root.querySelector("[data-planner-move-form]").addEventListener("submit", function(event) {
+    event.preventDefault();
+    const value = new FormData(event.currentTarget).get("assignment_date");
+    if (value) reviewMove(String(value));
+  });
+
+  modal.querySelectorAll("[data-planner-modal-close], [data-planner-modal-cancel]").forEach(function(button) {
+    button.addEventListener("click", function() { setModalOpen(false); });
+  });
+  confirmButton.addEventListener("click", function() { confirmMove(false); });
+  confirmExtraButton.addEventListener("click", function() { confirmMove(true); });
+  document.addEventListener("pointerdown", function(event) {
+    if (!event.target.closest("[data-planner-title-trigger]")) hideTitleTooltip();
+  });
+  window.addEventListener("scroll", hideTitleTooltip, true);
+  window.addEventListener("resize", hideTitleTooltip);
+  document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape") hideTitleTooltip();
+    if (event.key === "Escape" && !modal.classList.contains("hidden")) setModalOpen(false);
+  });
+})();
+</script>
+{% endblock %}

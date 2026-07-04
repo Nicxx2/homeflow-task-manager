@@ -142,6 +142,9 @@
         {% if item.can_update_status %}
         <form method="post" action="/tasks/{{ item.task.id }}/status" class="mt-2">
           <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+          {% if item.task.recurrence_pattern == "weekly" and not item.task.recurrence_parent_id %}
+          <input type="hidden" name="expected_recurrence_index" value="{{ item.task.recurrence_occurrence_index or 0 }}" />
+          {% endif %}
           <select
             name="status_value"
             onchange="this.form.submit()"

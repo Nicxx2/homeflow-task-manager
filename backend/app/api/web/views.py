@@ -1,4 +1,5 @@
 import json
+from calendar import monthrange
 from datetime import date, timedelta
 from urllib.parse import quote, urlparse
 
@@ -15,11 +16,13 @@ from backend.app.models.enums import EffortLevel, TaskStatus
 from backend.app.models.task import Task
 from backend.app.models.user import User
 from backend.app.schemas.auth import RegisterRequest
+from backend.app.schemas.planner import PlannerMoveRequest
 from backend.app.schemas.task import TaskAssignRequest, TaskCreate, TaskUpdate
 from backend.app.services.admin_settings_service import AdminSettingsService
 from backend.app.services.ai_service import AIService
 from backend.app.services.app_assistant_service import AppAssistantService
 from backend.app.services.auth_service import AuthService
+from backend.app.services.planner_service import PlannerService
 from backend.app.services.recurring_task_service import RecurringTaskService
 from backend.app.services.scheduling_service import SchedulingService
 from backend.app.services.task_service import TaskService
@@ -288,6 +291,7 @@ def _task_create_form_defaults(user: User) -> dict:
         "recurrence_until": "",
         "recurrence_count_limit": "",
         "recurrence_blocked_behavior": "skip",
+        "recurrence_late_behavior": "keep_schedule",
         "use_personal_highlight": False,
         "personal_highlight_color": user.accent_color,
         "assignee_id_create": "",
@@ -506,6 +510,7 @@ def _task_edit_context(
             else (str(task.recurrence_count_limit) if task.recurrence_count_limit is not None else "")
         ),
         "recurrence_blocked_behavior": task.recurrence_blocked_behavior or "skip",
+        "recurrence_late_behavior": task.recurrence_late_behavior or "keep_schedule",
         "use_personal_highlight": getattr(task, "personal_highlight_color", None) is not None,
         "personal_highlight_color": getattr(task, "personal_highlight_color", None) or user.accent_color,
         "assignee_id_edit": str(task.assignee_id) if task.assignee_id is not None else "",
@@ -647,6 +652,7 @@ def _parse_recurrence_form(
     recurrence_until: str,
     recurrence_count_limit: str,
     recurrence_blocked_behavior: str,
+    recurrence_late_behavior: str,
 ) -> dict:
     enabled = repeat_weekly.lower() in {"true", "on", "1", "yes"}
     if not enabled:
@@ -656,6 +662,7 @@ def _parse_recurrence_form(
             "recurrence_until": None,
             "recurrence_count_limit": None,
             "recurrence_blocked_behavior": None,
+            "recurrence_late_behavior": None,
         }
 
     interval_value = int(recurrence_interval_weeks) if recurrence_interval_weeks.strip() else 1
@@ -664,6 +671,9 @@ def _parse_recurrence_form(
     blocked_behavior = recurrence_blocked_behavior.strip() or "skip"
     if blocked_behavior not in {"skip", "move_same_week"}:
         raise ValueError("Invalid recurring blocked-date behavior.")
+    late_behavior = recurrence_late_behavior.strip() or "keep_schedule"
+    if late_behavior not in {"keep_schedule", "from_completion"}:
+        raise ValueError("Invalid late-completion behavior.")
 
     return {
         "recurrence_pattern": "weekly",
@@ -671,6 +681,7 @@ def _parse_recurrence_form(
         "recurrence_until": until_value,
         "recurrence_count_limit": count_limit_value,
         "recurrence_blocked_behavior": blocked_behavior,
+        "recurrence_late_behavior": late_behavior,
     }
 
 
@@ -1111,6 +1122,7 @@ def task_create_submit(
     recurrence_until: str = Form(""),
     recurrence_count_limit: str = Form(""),
     recurrence_blocked_behavior: str = Form("skip"),
+    recurrence_late_behavior: str = Form("keep_schedule"),
     use_personal_highlight: str = Form("false"),
     personal_highlight_color: str = Form(""),
     assignee_id_create: str = Form(""),
@@ -1134,6 +1146,7 @@ def task_create_submit(
         "recurrence_until": recurrence_until,
         "recurrence_count_limit": recurrence_count_limit,
         "recurrence_blocked_behavior": recurrence_blocked_behavior,
+        "recurrence_late_behavior": recurrence_late_behavior,
         "use_personal_highlight": use_personal_highlight.lower() in {"true", "on", "1", "yes"},
         "personal_highlight_color": personal_highlight_color or user.accent_color,
         "assignee_id_create": assignee_id_create,
@@ -1235,6 +1248,7 @@ def task_create_submit(
             recurrence_until=recurrence_until,
             recurrence_count_limit=recurrence_count_limit,
             recurrence_blocked_behavior=recurrence_blocked_behavior,
+            recurrence_late_behavior=recurrence_late_behavior,
         )
     except ValueError:
         return templates.TemplateResponse(
@@ -1404,11 +1418,13 @@ def task_edit_submit(
     recurrence_until: str = Form(""),
     recurrence_count_limit: str = Form(""),
     recurrence_blocked_behavior: str = Form("skip"),
+    recurrence_late_behavior: str = Form("keep_schedule"),
     use_personal_highlight: str = Form("false"),
     personal_highlight_color: str = Form(""),
     assignee_id_edit: str = Form(""),
     assignment_date_edit: str = Form(""),
     redirect_to: str = Form(""),
+    expected_recurrence_index: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1431,6 +1447,7 @@ def task_edit_submit(
         "recurrence_until": recurrence_until,
         "recurrence_count_limit": recurrence_count_limit,
         "recurrence_blocked_behavior": recurrence_blocked_behavior,
+        "recurrence_late_behavior": recurrence_late_behavior,
         "use_personal_highlight": use_personal_highlight.lower() in {"true", "on", "1", "yes"},
         "personal_highlight_color": personal_highlight_color or user.accent_color,
         "assignee_id_edit": assignee_id_edit,
@@ -1477,6 +1494,31 @@ def task_edit_submit(
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
+    completion_occurrence_index = None
+    is_recurring_completion = (
+        task.recurrence_pattern == "weekly"
+        and task.recurrence_parent_id is None
+        and update_status == TaskStatus.COMPLETED
+    )
+    if is_recurring_completion:
+        current_occurrence_index = RecurringTaskService(db).current_occurrence_index(task)
+        if expected_recurrence_index.strip():
+            try:
+                completion_occurrence_index = int(expected_recurrence_index)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid recurring occurrence.",
+                ) from exc
+            if completion_occurrence_index != current_occurrence_index:
+                return _redirect_to_target(
+                    request=request,
+                    redirect_to=redirect_target,
+                    default=f"/tasks/{task_id}",
+                )
+        else:
+            completion_occurrence_index = current_occurrence_index
+
     if task.recurrence_parent_id is not None:
         recurrence_values = {
             "recurrence_pattern": None,
@@ -1484,6 +1526,7 @@ def task_edit_submit(
             "recurrence_until": None,
             "recurrence_count_limit": None,
             "recurrence_blocked_behavior": None,
+            "recurrence_late_behavior": None,
         }
     else:
         try:
@@ -1493,6 +1536,7 @@ def task_edit_submit(
                 recurrence_until=recurrence_until,
                 recurrence_count_limit=recurrence_count_limit,
                 recurrence_blocked_behavior=recurrence_blocked_behavior,
+                recurrence_late_behavior=recurrence_late_behavior,
             )
         except ValueError:
             return templates.TemplateResponse(
@@ -1623,6 +1667,12 @@ def task_edit_submit(
             due_date=update_due_date,
             assignee_id=selected_assignee_id,
             assignment_date=selected_assignment_date if selected_assignee_id is not None else None,
+        )
+    if is_recurring_completion:
+        service.update_status(
+            task,
+            TaskStatus.COMPLETED,
+            expected_recurrence_index=completion_occurrence_index,
         )
     UserTaskDisplayService(db).set_highlight_color(
         user=user,
@@ -1847,6 +1897,7 @@ def task_status_submit(
     request: Request,
     status_value: str = Form(...),
     redirect_to: str = Form(""),
+    expected_recurrence_index: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1862,7 +1913,14 @@ def task_status_submit(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status value.") from exc
 
-    service.update_status(task, new_status)
+    expected_index = None
+    if expected_recurrence_index.strip():
+        try:
+            expected_index = int(expected_recurrence_index)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid recurring occurrence.") from exc
+
+    service.update_status(task, new_status, expected_recurrence_index=expected_index)
     return _redirect_to_target(request=request, redirect_to=redirect_to, default=f"/tasks/{task_id}")
 
 
@@ -2062,6 +2120,152 @@ def task_create_assignment_next_available(
     )
     status_code = status.HTTP_200_OK if payload["ok"] else status.HTTP_400_BAD_REQUEST
     return JSONResponse(payload, status_code=status_code)
+
+
+def _shift_month(value: date, offset: int) -> date:
+    month_index = value.year * 12 + value.month - 1 + offset
+    return date(month_index // 12, month_index % 12 + 1, 1)
+
+
+def _planner_period(*, view: str, anchor: date, today: date) -> dict:
+    selected_view = "month" if view == "month" else "week"
+    if selected_view == "month":
+        focus = anchor.replace(day=1)
+        month_end = focus.replace(day=monthrange(focus.year, focus.month)[1])
+        start_date = focus - timedelta(days=focus.weekday())
+        end_date = month_end + timedelta(days=6 - month_end.weekday())
+        previous_anchor = _shift_month(focus, -1)
+        next_anchor = _shift_month(focus, 1)
+        label = focus.strftime("%B %Y")
+    else:
+        start_date = anchor - timedelta(days=anchor.weekday())
+        end_date = start_date + timedelta(days=6)
+        previous_anchor = start_date - timedelta(days=7)
+        next_anchor = start_date + timedelta(days=7)
+        label = f"{start_date.day} {start_date.strftime('%b')} - {end_date.day} {end_date.strftime('%b %Y')}"
+
+    active_mobile_date = today if start_date <= today <= end_date else start_date
+    return {
+        "view": selected_view,
+        "start_date": start_date,
+        "end_date": end_date,
+        "previous_anchor": previous_anchor,
+        "next_anchor": next_anchor,
+        "navigation_anchor": focus if selected_view == "month" else start_date,
+        "month_navigation_anchor": focus if selected_view == "month" else (today if start_date <= today <= end_date else anchor),
+        "label": label,
+        "focus_month": focus.month if selected_view == "month" else anchor.month,
+        "focus_year": anchor.year,
+        "active_mobile_date": active_mobile_date,
+    }
+
+
+@router.get("/planner", response_class=HTMLResponse)
+def planner_page(
+    request: Request,
+    view: str = "week",
+    start: str | None = None,
+    scope: str = "mine",
+    member_id: int | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        anchor = date.fromisoformat(start) if start else date.today()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid planner date.") from exc
+
+    visible_members = _member_users(db)
+    selected_member = None
+    selected_member_id = None
+    if scope == "team":
+        selected_scope = "team"
+        members = visible_members
+    elif scope == "member" or member_id is not None:
+        if member_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a planner member.")
+        selected_member = next((member for member in visible_members if member.id == member_id), None)
+        if selected_member is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planner member not found.")
+        selected_scope = "member"
+        selected_member_id = selected_member.id
+        members = [selected_member]
+    else:
+        selected_scope = "mine"
+        members = [user]
+    filter_query = f"scope={selected_scope}"
+    if selected_member_id is not None:
+        filter_query = f"{filter_query}&member_id={selected_member_id}"
+
+    today = date.today()
+    period = _planner_period(view=view, anchor=anchor, today=today)
+    planner = PlannerService(db)
+    days = planner.get_calendar_days(
+        members=members,
+        start_date=period["start_date"],
+        end_date=period["end_date"],
+    )
+    mobile_destination_start = max(today, period["start_date"] - timedelta(days=21))
+    mobile_destination_end = max(period["end_date"] + timedelta(days=21), mobile_destination_start + timedelta(days=21))
+    mobile_destination_days = planner.get_calendar_days(
+        members=members,
+        start_date=mobile_destination_start,
+        end_date=mobile_destination_end,
+    )
+    visible_tasks = list({task.id: task for day_item in days for task in day_item["tasks"]}.values())
+    _apply_personal_task_highlights(db=db, user=user, tasks=visible_tasks)
+
+    return templates.TemplateResponse(
+        "planner.html",
+        {
+            "request": request,
+            "user": user,
+            "days": days,
+            "mobile_destination_days": mobile_destination_days,
+            "members": members,
+            "visible_members": visible_members,
+            "selected_member": selected_member,
+            "selected_member_id": selected_member_id,
+            "filter_query": filter_query,
+            "current_page_return_to": _encoded_redirect_target(_current_path_with_query(request, "/planner")),
+            "scope": selected_scope,
+            "today": today,
+            "weekday_labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            **period,
+        },
+    )
+
+
+@router.post("/planner/move/preview")
+def planner_move_preview(
+    payload: PlannerMoveRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = PlannerService(db).preview_move(
+        task_ids=payload.task_ids,
+        assignment_date=payload.assignment_date,
+        viewer=user,
+    )
+    return JSONResponse(result, status_code=status.HTTP_200_OK if result["ok"] else status.HTTP_400_BAD_REQUEST)
+
+
+@router.post("/planner/move/commit")
+def planner_move_commit(
+    payload: PlannerMoveRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = PlannerService(db).commit_move(
+        task_ids=payload.task_ids,
+        assignment_date=payload.assignment_date,
+        fingerprint=payload.fingerprint or "",
+        viewer=user,
+        add_extra_capacity=payload.add_extra_capacity,
+    )
+    if result.get("conflict"):
+        return JSONResponse(result, status_code=status.HTTP_409_CONFLICT)
+    return JSONResponse(result, status_code=status.HTTP_200_OK if result["ok"] else status.HTTP_400_BAD_REQUEST)
 
 
 @router.get("/schedule", response_class=HTMLResponse)

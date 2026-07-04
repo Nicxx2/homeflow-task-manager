@@ -143,6 +143,9 @@
       {% if user.is_admin or task.assignee_id == user.id %}
       <form method="post" action="/tasks/{{ task.id }}/status">
         <input type="hidden" name="redirect_to" value="{{ current_page_url }}" />
+        {% if task.recurrence_pattern == "weekly" and not task.recurrence_parent_id %}
+        <input type="hidden" name="expected_recurrence_index" value="{{ task.recurrence_occurrence_index or 0 }}" />
+        {% endif %}
         <select
           name="status_value"
           onchange="this.form.submit()"

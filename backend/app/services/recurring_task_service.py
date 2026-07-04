@@ -11,12 +11,16 @@ from backend.app.services.workload_service import WorkloadService
 
 
 class RecurringTaskService:
+    KEEP_SCHEDULE = "keep_schedule"
+    FROM_COMPLETION = "from_completion"
+    MAX_OCCURRENCE_SEARCH = 104
+
     def __init__(self, db: Session):
         self.db = db
         self.workload = WorkloadService(db)
 
     def preview_next_occurrence(self, root: Task) -> dict | None:
-        return self._next_occurrence_after_current(root)
+        return self._next_occurrence_after_current(root, reference_date=date.today())
 
     def current_occurrence_index(self, root: Task) -> int:
         return self._current_occurrence_index(root)
@@ -39,19 +43,23 @@ class RecurringTaskService:
             recurrence_count_limit=root.recurrence_count_limit,
             recurrence_until=root.recurrence_until,
             recurrence_blocked_behavior=root.recurrence_blocked_behavior,
+            recurrence_late_behavior=getattr(root, "recurrence_late_behavior", None),
             recurrence_anchor_date=root.recurrence_anchor_date,
             recurrence_occurrence_index=self.current_occurrence_index(root),
         )
 
         remaining = 0
+        reference_date = date.today()
         while True:
-            next_occurrence = self._next_occurrence_after_current(cursor)
+            next_occurrence = self._next_occurrence_after_current(cursor, reference_date=reference_date)
+            reference_date = None
             if next_occurrence is None:
                 return remaining
             remaining += 1
             cursor.due_date = next_occurrence["due_date"]
             cursor.assignment_date = next_occurrence["assignment_date"]
             cursor.assignee_id = next_occurrence["assignee_id"]
+            cursor.recurrence_anchor_date = next_occurrence["anchor_date"]
             cursor.recurrence_occurrence_index = next_occurrence["occurrence_index"]
 
     def sync(self) -> int:
@@ -72,9 +80,18 @@ class RecurringTaskService:
         self.db.commit()
         return removed_count
 
-    def complete_occurrence(self, root: Task) -> Task:
+    def complete_occurrence(self, root: Task, *, expected_occurrence_index: int | None = None) -> Task:
         self.sync()
-        next_occurrence = self._next_occurrence_after_current(root)
+        locked_root = self.db.scalar(select(Task).where(Task.id == root.id).with_for_update())
+        if locked_root is None:
+            return root
+        root = locked_root
+        if (
+            expected_occurrence_index is not None
+            and self.current_occurrence_index(root) != expected_occurrence_index
+        ):
+            return root
+        next_occurrence = self._next_occurrence_after_current(root, reference_date=date.today())
         if next_occurrence is None:
             root.status = TaskStatus.COMPLETED
             self.db.add(root)
@@ -87,6 +104,7 @@ class RecurringTaskService:
         root.due_date = next_occurrence["due_date"]
         root.assignment_date = next_occurrence["assignment_date"]
         root.assignee_id = next_occurrence["assignee_id"]
+        root.recurrence_anchor_date = next_occurrence["anchor_date"]
         root.recurrence_occurrence_index = next_occurrence["occurrence_index"]
         self.db.add(root)
         self.db.commit()
@@ -95,7 +113,7 @@ class RecurringTaskService:
 
     def delete_current_occurrence(self, root: Task) -> Task | None:
         self.sync()
-        next_occurrence = self._next_occurrence_after_current(root)
+        next_occurrence = self._next_occurrence_after_current(root, reference_date=date.today())
         if next_occurrence is None:
             history_items = list(
                 self.db.scalars(
@@ -125,6 +143,7 @@ class RecurringTaskService:
         root.due_date = next_occurrence["due_date"]
         root.assignment_date = next_occurrence["assignment_date"]
         root.assignee_id = next_occurrence["assignee_id"]
+        root.recurrence_anchor_date = next_occurrence["anchor_date"]
         root.recurrence_occurrence_index = next_occurrence["occurrence_index"]
         self.db.add(root)
         self.db.commit()
@@ -159,18 +178,36 @@ class RecurringTaskService:
 
         return None
 
-    def _next_occurrence_after_current(self, root: Task) -> dict | None:
+    def _next_occurrence_after_current(
+        self,
+        root: Task,
+        *,
+        reference_date: date | None = None,
+    ) -> dict | None:
         anchor = root.recurrence_anchor_date or root.due_date
         interval_weeks = root.recurrence_interval_weeks or 1
-        next_index = self.current_occurrence_index(root) + 1
+        interval_days = interval_weeks * 7
+        current_index = self.current_occurrence_index(root)
+        next_index = current_index + 1
+        late_behavior = getattr(root, "recurrence_late_behavior", None) or self.KEEP_SCHEDULE
 
-        while True:
+        if reference_date is not None:
+            if late_behavior == self.FROM_COMPLETION:
+                anchor = reference_date - timedelta(days=interval_days * current_index)
+            elif root.due_date < reference_date:
+                elapsed_intervals = max((reference_date - anchor).days // interval_days, 0)
+                next_index = max(next_index, elapsed_intervals + 1)
+
+        first_candidate: tuple[int, date] | None = None
+        for _ in range(self.MAX_OCCURRENCE_SEARCH):
             if root.recurrence_count_limit and next_index >= root.recurrence_count_limit:
                 return None
 
-            scheduled_date = anchor + timedelta(weeks=interval_weeks * next_index)
+            scheduled_date = anchor + timedelta(days=interval_days * next_index)
             if root.recurrence_until and scheduled_date > root.recurrence_until:
                 return None
+            if first_candidate is None:
+                first_candidate = (next_index, scheduled_date)
 
             resolved_due_date = self._resolve_occurrence_date(root, scheduled_date)
             if resolved_due_date is None:
@@ -197,7 +234,21 @@ class RecurringTaskService:
                 "due_date": resolved_due_date,
                 "assignment_date": assignment_date,
                 "assignee_id": assignee_id if assignment_date is not None else None,
+                "anchor_date": anchor,
             }
+
+        # A permanently blocked recurring weekday must not make the request loop forever.
+        # Keep the next due occurrence visible but unassigned so the schedule can be corrected.
+        if first_candidate is None:
+            return None
+        fallback_index, fallback_due_date = first_candidate
+        return {
+            "occurrence_index": fallback_index,
+            "due_date": fallback_due_date,
+            "assignment_date": None,
+            "assignee_id": None,
+            "anchor_date": anchor,
+        }
 
     def _create_completed_snapshot(self, root: Task) -> Task:
         history = Task(

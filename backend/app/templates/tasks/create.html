@@ -194,6 +194,7 @@
             <option value="move_same_week" {% if form_values.recurrence_blocked_behavior == "move_same_week" %}selected{% endif %}>Move to the next allowed day in the same week</option>
           </select>
         </label>
+        {% include "tasks/partials/recurrence_late_behavior.html" %}
       </div>
     </details>
   </div>
