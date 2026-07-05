@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -95,6 +95,23 @@ def _create_assigned_task(db, *, creator, assignee, title: str, due_date: date, 
     return task
 
 
+def _complete_task_on(db, task: Task, completed_on: date) -> Task:
+    TaskService(db).update_status(task, TaskStatus.COMPLETED)
+    db.refresh(task)
+    task.completed_at = datetime(
+        completed_on.year,
+        completed_on.month,
+        completed_on.day,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def test_assistant_lists_low_tasks_with_action():
     db = SessionLocal()
     try:
@@ -115,9 +132,7 @@ def test_assistant_lists_low_tasks_with_action():
             due_date=date.fromordinal(date.today().toordinal() - 60),
             effort_level=EffortLevel.LOW,
         )
-        completed.status = TaskStatus.COMPLETED
-        db.add(completed)
-        db.commit()
+        _complete_task_on(db, completed, date.today())
 
         client = _authed_client(viewer)
         response = client.post("/assistant/chat", data={"message": "list low tasks"})
@@ -145,9 +160,7 @@ def test_assistant_explicit_completed_tasks_can_be_listed():
             due_date=date.today(),
             effort_level=EffortLevel.LOW,
         )
-        completed.status = TaskStatus.COMPLETED
-        db.add(completed)
-        db.commit()
+        _complete_task_on(db, completed, date.today())
 
         client = _authed_client(viewer)
         response = client.post("/assistant/chat", data={"message": "show completed low tasks today"})
@@ -199,6 +212,214 @@ def test_assistant_filters_by_visible_member_and_planned_date():
         payload = response.json()
         titles = [item["title"] for item in payload["items"]]
         assert titles == [matching.title]
+    finally:
+        db.close()
+
+
+def test_assistant_understands_partial_member_name_for_today_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"partial-viewer-{token}@example.com", full_name="Partial Viewer", capacity=10)
+        teammate = _create_user(db, email=f"bethan-{token}@example.com", full_name=f"Bethan{token} Smith", capacity=10)
+        matching = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Bethan Today {token}",
+            due_date=date.today(),
+            assignment_date=date.today(),
+            effort_level=EffortLevel.LOW,
+        )
+        mine = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Viewer Today {token}",
+            due_date=date.today(),
+            assignment_date=date.today(),
+            effort_level=EffortLevel.LOW,
+        )
+
+        response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": f"does Bethan{token} have any tasks today?"},
+        )
+
+        assert response.status_code == 200
+        titles = [item["title"] for item in response.json()["items"]]
+        assert matching.title in titles
+        assert mine.title not in titles
+    finally:
+        db.close()
+
+
+def test_assistant_member_name_containing_effort_word_does_not_filter_effort():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"marlow-viewer-{token}@example.com", full_name="Effort Viewer", capacity=10)
+        teammate = _create_user(db, email=f"marlow-mate-{token}@example.com", full_name=f"Marlow{token} Lane", capacity=10)
+        matching = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Marlow High Today {token}",
+            due_date=date.today(),
+            assignment_date=date.today(),
+            effort_level=EffortLevel.HIGH,
+        )
+
+        response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": f"does Marlow{token} have any tasks today?"},
+        )
+
+        assert response.status_code == 200
+        titles = [item["title"] for item in response.json()["items"]]
+        assert matching.title in titles
+    finally:
+        db.close()
+
+
+def test_assistant_completed_today_uses_completion_date_not_due_date():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"complete-date-viewer-{token}@example.com", full_name="Complete Date Viewer", capacity=10)
+        completed_today = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Completed Today {token}",
+            due_date=date.today() + timedelta(days=4),
+            assignment_date=date.today() - timedelta(days=1),
+            effort_level=EffortLevel.LOW,
+        )
+        due_today_completed_yesterday = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Due Today Completed Yesterday {token}",
+            due_date=date.today(),
+            assignment_date=date.today(),
+            effort_level=EffortLevel.LOW,
+        )
+        teammate = _create_user(db, email=f"complete-mate-{token}@example.com", full_name="Complete Mate", capacity=10)
+        teammate_completed_today = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Teammate Completed Today {token}",
+            due_date=date.today() + timedelta(days=2),
+            assignment_date=date.today(),
+            effort_level=EffortLevel.LOW,
+        )
+        _complete_task_on(db, completed_today, date.today())
+        _complete_task_on(db, due_today_completed_yesterday, date.today() - timedelta(days=1))
+        _complete_task_on(db, teammate_completed_today, date.today())
+
+        response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": "show completed tasks from today"},
+        )
+
+        assert response.status_code == 200
+        titles = [item["title"] for item in response.json()["items"]]
+        assert completed_today.title in titles
+        assert due_today_completed_yesterday.title not in titles
+
+        finish_response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": "what tasks did I finish today"},
+        )
+
+        assert finish_response.status_code == 200
+        finish_titles = [item["title"] for item in finish_response.json()["items"]]
+        assert completed_today.title in finish_titles
+        assert due_today_completed_yesterday.title not in finish_titles
+
+        team_response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": "who completed tasks today"},
+        )
+
+        assert team_response.status_code == 200
+        team_titles = [item["title"] for item in team_response.json()["items"]]
+        assert teammate_completed_today.title in team_titles
+        assert due_today_completed_yesterday.title not in team_titles
+    finally:
+        db.close()
+
+
+def test_assistant_historical_have_tasks_uses_assignment_date_and_includes_completed():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"history-viewer-{token}@example.com", full_name="History Viewer", capacity=10)
+        target_day = date.today() - timedelta(days=28)
+        matching = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Historical Assigned {token}",
+            due_date=target_day + timedelta(days=3),
+            assignment_date=target_day,
+            effort_level=EffortLevel.MEDIUM,
+        )
+        due_only = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Historical Due Only {token}",
+            due_date=target_day,
+            assignment_date=target_day + timedelta(days=1),
+            effort_level=EffortLevel.MEDIUM,
+        )
+        _complete_task_on(db, matching, target_day + timedelta(days=1))
+
+        response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": f"what tasks did I have on {target_day.isoformat()}"},
+        )
+
+        assert response.status_code == 200
+        titles = [item["title"] for item in response.json()["items"]]
+        assert matching.title in titles
+        assert due_only.title not in titles
+    finally:
+        db.close()
+
+
+def test_assistant_completed_on_spoken_date_uses_completed_at():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"spoken-complete-viewer-{token}@example.com", full_name="Spoken Complete Viewer", capacity=10)
+        completed_on = date.today() - timedelta(days=14)
+        matching = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"Spoken Completed {token}",
+            due_date=completed_on - timedelta(days=2),
+            assignment_date=completed_on - timedelta(days=2),
+            effort_level=EffortLevel.HIGH,
+        )
+        _complete_task_on(db, matching, completed_on)
+
+        response = _authed_client(viewer).post(
+            "/assistant/chat",
+            data={"message": f"what did I complete on {completed_on.day}th of {completed_on.strftime('%B')}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["items"][0]["title"] == matching.title
     finally:
         db.close()
 
@@ -263,6 +484,34 @@ def test_assistant_unsupported_write_requests_stay_read_only():
         broad_payload = broad_response.json()
         assert broad_payload["items"] == []
         assert "Use Planner or the task form" in broad_payload["reply"]
+
+        complete_response = _authed_client(viewer).post("/assistant/chat", data={"message": "mark this task done"})
+
+        assert complete_response.status_code == 200
+        complete_payload = complete_response.json()
+        assert complete_payload["items"] == []
+        assert "Use Planner or the task form" in complete_payload["reply"]
+
+        finish_response = _authed_client(viewer).post("/assistant/chat", data={"message": "complete the task"})
+
+        assert finish_response.status_code == 200
+        finish_payload = finish_response.json()
+        assert finish_payload["items"] == []
+        assert "Use Planner or the task form" in finish_payload["reply"]
+
+        finish_tasks_response = _authed_client(viewer).post("/assistant/chat", data={"message": "finish tasks"})
+
+        assert finish_tasks_response.status_code == 200
+        finish_tasks_payload = finish_tasks_response.json()
+        assert finish_tasks_payload["items"] == []
+        assert "Use Planner or the task form" in finish_tasks_payload["reply"]
+
+        mark_it_response = _authed_client(viewer).post("/assistant/chat", data={"message": "mark it done"})
+
+        assert mark_it_response.status_code == 200
+        mark_it_payload = mark_it_response.json()
+        assert mark_it_payload["items"] == []
+        assert "Use Planner or the task form" in mark_it_payload["reply"]
     finally:
         db.close()
 
@@ -309,6 +558,59 @@ def test_assistant_can_use_safe_ai_read_intent(monkeypatch):
         titles = [item["title"] for item in payload["items"]]
         assert titles[0] == low.title
         assert all("High" not in title for title in titles)
+    finally:
+        db.close()
+
+
+def test_assistant_ai_read_intent_can_filter_completed_date_and_partial_member(monkeypatch):
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(db, email=f"ai-completed-viewer-{token}@example.com", full_name="AI Completed Viewer", capacity=8)
+        teammate = _create_user(db, email=f"ai-bethan-{token}@example.com", full_name=f"BethanAI{token} Smith", capacity=8)
+        completed_day = date.today() - timedelta(days=2)
+        matching = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"AI Completed Member {token}",
+            due_date=completed_day + timedelta(days=5),
+            assignment_date=completed_day - timedelta(days=1),
+            effort_level=EffortLevel.LOW,
+        )
+        _complete_task_on(db, matching, completed_day)
+        other = _create_assigned_task(
+            db,
+            creator=viewer,
+            assignee=viewer,
+            title=f"AI Completed Viewer {token}",
+            due_date=completed_day,
+            assignment_date=completed_day,
+            effort_level=EffortLevel.LOW,
+        )
+        _complete_task_on(db, other, completed_day)
+
+        def fake_parse(self, *, message, visible_members, today):
+            _ = (self, message, visible_members, today)
+            return {
+                "intent": "list_tasks",
+                "effort": None,
+                "status": None,
+                "date": completed_day.isoformat(),
+                "date_field": "completed",
+                "assignee": f"BethanAI{token}",
+                "confidence": 0.92,
+            }
+
+        monkeypatch.setattr(AIOrchestratorService, "parse_assistant_intent", fake_parse)
+
+        response = _authed_client(viewer).post("/assistant/chat", data={"message": "which chores got wrapped then"})
+
+        assert response.status_code == 200
+        titles = [item["title"] for item in response.json()["items"]]
+        assert matching.title in titles
+        assert other.title not in titles
     finally:
         db.close()
 
@@ -589,9 +891,7 @@ def test_assistant_filters_today_tasks_by_effort_and_status():
             due_date=date.today(),
             effort_level=EffortLevel.MEDIUM,
         )
-        non_matching_status.status = TaskStatus.COMPLETED
-        db.add(non_matching_status)
-        db.commit()
+        _complete_task_on(db, non_matching_status, date.today())
 
         client = _authed_client(viewer)
         response = client.post("/assistant/chat", data={"message": "show today's medium pending tasks"})
@@ -600,5 +900,12 @@ def test_assistant_filters_today_tasks_by_effort_and_status():
         payload = response.json()
         assert payload["items"][0]["title"] == matching.title
         assert all("Completed" not in item["title"] for item in payload["items"])
+
+        not_completed_response = client.post("/assistant/chat", data={"message": "show not completed medium tasks today"})
+
+        assert not_completed_response.status_code == 200
+        not_completed_payload = not_completed_response.json()
+        assert not_completed_payload["items"][0]["title"] == matching.title
+        assert all("Completed" not in item["title"] for item in not_completed_payload["items"])
     finally:
         db.close()

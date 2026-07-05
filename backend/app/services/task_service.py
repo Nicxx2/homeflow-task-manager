@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -22,6 +22,15 @@ class TaskService:
         if not config:
             raise ValueError(f"No points configured for level '{effort_level.value}'.")
         return config.points_value
+
+    @staticmethod
+    def _set_status(task: Task, status: TaskStatus) -> None:
+        if status == TaskStatus.COMPLETED:
+            if task.completed_at is None:
+                task.completed_at = datetime.now(timezone.utc)
+        else:
+            task.completed_at = None
+        task.status = status
 
     def get_points_for_level(self, effort_level: EffortLevel) -> int:
         return self._points_for_level(effort_level)
@@ -192,7 +201,7 @@ class TaskService:
         task.due_date = payload.due_date
         task.effort_level = payload.effort_level
         task.points_value = self._points_for_level(payload.effort_level)
-        task.status = payload.status
+        self._set_status(task, payload.status)
         if not was_recurring_occurrence_copy:
             task.recurrence_pattern = payload.recurrence_pattern
             task.recurrence_interval_weeks = payload.recurrence_interval_weeks
@@ -236,7 +245,7 @@ class TaskService:
             )
         if self._is_recurring_occurrence_copy(task) and status != TaskStatus.COMPLETED:
             self._clear_recurrence_metadata(task)
-        task.status = status
+        self._set_status(task, status)
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)

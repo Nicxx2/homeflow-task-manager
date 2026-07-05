@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -91,16 +91,19 @@ class RecurringTaskService:
             and self.current_occurrence_index(root) != expected_occurrence_index
         ):
             return root
+        completion_time = datetime.now(timezone.utc)
         next_occurrence = self._next_occurrence_after_current(root, reference_date=date.today())
         if next_occurrence is None:
             root.status = TaskStatus.COMPLETED
+            root.completed_at = completion_time
             self.db.add(root)
             self.db.commit()
             self.db.refresh(root)
             return root
 
-        self._create_completed_snapshot(root)
+        self._create_completed_snapshot(root, completed_at=completion_time)
         root.status = TaskStatus.PENDING
+        root.completed_at = None
         root.due_date = next_occurrence["due_date"]
         root.assignment_date = next_occurrence["assignment_date"]
         root.assignee_id = next_occurrence["assignee_id"]
@@ -140,6 +143,7 @@ class RecurringTaskService:
             return None
 
         root.status = TaskStatus.PENDING
+        root.completed_at = None
         root.due_date = next_occurrence["due_date"]
         root.assignment_date = next_occurrence["assignment_date"]
         root.assignee_id = next_occurrence["assignee_id"]
@@ -250,7 +254,7 @@ class RecurringTaskService:
             "anchor_date": anchor,
         }
 
-    def _create_completed_snapshot(self, root: Task) -> Task:
+    def _create_completed_snapshot(self, root: Task, *, completed_at: datetime) -> Task:
         history = Task(
             title=root.title,
             description=root.description,
@@ -261,6 +265,7 @@ class RecurringTaskService:
             effort_level=root.effort_level,
             points_value=root.points_value,
             status=TaskStatus.COMPLETED,
+            completed_at=completed_at,
             ai_suggested_level=root.ai_suggested_level,
             ai_confidence=root.ai_confidence,
             ai_reason=root.ai_reason,

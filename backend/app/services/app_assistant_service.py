@@ -76,12 +76,9 @@ class AppAssistantService:
             return self._unsupported_action_response()
 
         effort = self._extract_effort(query)
-        due_today = self._is_due_today_query(query)
-        assigned_today = self._is_assigned_today_query(query)
         status_filter = self._extract_status(query)
-        active_only = self._active_only(query=query, status_filter=status_filter)
         overdue = self._is_overdue_query(query)
-        date_filter = self._extract_date_filter(query)
+
         if "most capacity" in query or "most room" in query:
             return self._most_capacity_response()
 
@@ -98,6 +95,15 @@ class AppAssistantService:
 
         only_unassigned = self._is_unassigned_query(query) or member_filter.unassigned
         assignee_id = member_filter.user.id if member_filter.user else None
+        date_filter = self._extract_date_filter(
+            query,
+            status_filter=status_filter,
+            only_unassigned=only_unassigned,
+            assignee_id=assignee_id,
+        )
+        active_only = self._active_only(query=query, status_filter=status_filter, date_filter=date_filter)
+        due_today = False
+        assigned_today = False
         personal_only = not (only_unassigned or assignee_id is not None or self._is_team_scope_query(query))
 
         if effort and self._is_assign_me_query(query):
@@ -197,7 +203,15 @@ class AppAssistantService:
         active_only: bool,
         personal_only: bool,
     ) -> dict:
-        tasks = self.task_service.get_tasks(only_unassigned=only_unassigned if only_unassigned else None)
+        include_history = (
+            status_filter == TaskStatus.COMPLETED
+            or not active_only
+            or (date_filter is not None and date_filter.value < date.today())
+        )
+        tasks = self.task_service.get_tasks(
+            only_unassigned=only_unassigned if only_unassigned else None,
+            include_history=include_history,
+        )
         if personal_only:
             tasks = [task for task in tasks if task.created_by_id == self.user.id or task.assignee_id == self.user.id]
         tasks = self._filter_tasks(
@@ -234,8 +248,6 @@ class AppAssistantService:
             }
 
         reply = f"I found {len(items)} {label + ' ' if label else ''}task{'s' if len(items) != 1 else ''}."
-        if status_filter == TaskStatus.COMPLETED and date_filter is not None:
-            reply += " Completion date is not stored, so I matched due/planned dates."
 
         return {
             "reply": reply,
@@ -401,6 +413,8 @@ class AppAssistantService:
         ]
         if task.assignment_date:
             meta_parts.append(f"planned {task.assignment_date}")
+        if task.completed_at:
+            meta_parts.append(f"completed {task.completed_at.date()}")
         meta_parts.append(assignee_label)
 
         item = {
@@ -535,6 +549,7 @@ class AppAssistantService:
             field_label = {
                 "due": "due on",
                 "assignment": "planned on",
+                "completed": "completed on",
                 "either": "due/planned on",
             }.get(date_filter.field, "on")
             label_parts.append(f"{field_label} {date_filter.value.isoformat()}")
@@ -572,8 +587,12 @@ class AppAssistantService:
         effort = self._effort_from_value(raw.get("effort"))
         status_filter = self._status_from_value(raw.get("status"))
         raw_status = str(raw.get("status") or "active").strip().lower()
-        active_only = status_filter is None and raw_status in {"active", "open", "none", ""}
         date_filter = self._date_filter_from_ai(raw)
+        active_only = (
+            status_filter is None
+            and raw_status in {"active", "open", "none", ""}
+            and self._active_only(query=query, status_filter=status_filter, date_filter=date_filter)
+        )
         member_filter = self._member_filter_from_ai(raw, visible_members=visible_members)
         if member_filter.ambiguous_names:
             return None
@@ -629,10 +648,11 @@ class AppAssistantService:
     def _resolve_member_filter(self, query: str) -> _MemberFilter:
         if self._is_unassigned_query(query):
             return _MemberFilter(unassigned=True)
-        if any(flag in query for flag in ("assigned to me", "my tasks", "my task", "for me", "mine")):
-            return _MemberFilter(user=self.user)
 
         normalized_query = self._normalize_text(query)
+        if self._is_current_user_task_query(normalized_query):
+            return _MemberFilter(user=self.user)
+
         visible_members = self._member_users()
         full_matches = [
             member
@@ -645,10 +665,11 @@ class AppAssistantService:
                 return _MemberFilter(user=next(iter(unique.values())))
             return _MemberFilter(ambiguous_names=tuple(member.full_name for member in unique.values()))
 
+        query_words = set(normalized_query.split())
         token_matches = []
         for member in visible_members:
             name_parts = [part for part in self._normalize_text(member.full_name).split() if len(part) >= 3]
-            if any(self._query_targets_name_token(normalized_query, part) for part in name_parts):
+            if any(self._query_targets_name_token(normalized_query, query_words, part) for part in name_parts):
                 token_matches.append(member)
 
         unique = {member.id: member for member in token_matches}
@@ -659,31 +680,75 @@ class AppAssistantService:
         return _MemberFilter()
 
     @staticmethod
-    def _query_targets_name_token(normalized_query: str, token: str) -> bool:
+    def _is_current_user_task_query(normalized_query: str) -> bool:
+        phrases = (
+            "assigned to me",
+            "for me",
+            "my task",
+            "my tasks",
+            "mine",
+            "do i have",
+            "did i have",
+            "i have",
+            "i had",
+            "what did i",
+            "what have i",
+            "i completed",
+            "i complete",
+            "i finished",
+            "i finish",
+        )
+        return any(phrase in normalized_query for phrase in phrases)
+
+    @staticmethod
+    def _query_targets_name_token(normalized_query: str, query_words: set[str], token: str) -> bool:
         reserved = {
             "active",
+            "all",
+            "any",
             "assigned",
             "available",
+            "can",
             "capacity",
             "completed",
             "done",
             "due",
+            "everybody",
+            "everyone",
+            "find",
+            "finished",
+            "for",
+            "from",
+            "had",
+            "has",
+            "have",
             "high",
             "late",
+            "list",
             "low",
             "medium",
+            "mine",
             "open",
             "overdue",
             "planned",
             "pending",
+            "person",
             "scheduled",
+            "show",
             "task",
             "tasks",
+            "team",
             "today",
             "tomorrow",
             "unassigned",
+            "what",
+            "when",
+            "which",
+            "who",
+            "yesterday",
         }
-        if token in reserved:
+        month_names = set(AppAssistantService._MONTHS.keys())
+        if token in reserved or token in month_names:
             return False
         target_phrases = (
             f"for {token}",
@@ -691,8 +756,13 @@ class AppAssistantService:
             f"by {token}",
             f"member {token}",
             f"person {token}",
+            f"does {token}",
+            f"did {token}",
+            f"has {token}",
         )
-        return any(phrase in normalized_query for phrase in target_phrases)
+        if any(phrase in normalized_query for phrase in target_phrases):
+            return True
+        return any(len(word) >= 3 and token.startswith(word) and word not in reserved and word not in month_names for word in query_words)
 
     def _member_filter_from_ai(self, raw: dict, *, visible_members: list[User]) -> _MemberFilter:
         value = raw.get("assignee")
@@ -708,6 +778,17 @@ class AppAssistantService:
         matches = [member for member in visible_members if self._normalize_text(member.full_name) == normalized]
         if len(matches) == 1:
             return _MemberFilter(user=matches[0])
+        query_words = set(normalized.split())
+        token_matches = []
+        for member in visible_members:
+            name_parts = [part for part in self._normalize_text(member.full_name).split() if len(part) >= 3]
+            if any(self._query_targets_name_token(normalized, query_words, part) for part in name_parts):
+                token_matches.append(member)
+        unique = {member.id: member for member in token_matches}
+        if len(unique) == 1:
+            return _MemberFilter(user=next(iter(unique.values())))
+        if len(unique) > 1:
+            return _MemberFilter(ambiguous_names=tuple(member.full_name for member in unique.values()))
         return _MemberFilter()
 
     def _date_filter_from_ai(self, raw: dict) -> _DateFilter | None:
@@ -719,18 +800,29 @@ class AppAssistantService:
         except ValueError:
             return None
         field = str(raw.get("date_field") or "either").strip().lower()
-        if field not in {"due", "assignment", "either"}:
+        if field not in {"due", "assignment", "completed", "either"}:
             field = "either"
         return _DateFilter(value=parsed, field=field)
 
-    def _extract_date_filter(self, query: str) -> _DateFilter | None:
+    def _extract_date_filter(
+        self,
+        query: str,
+        *,
+        status_filter: TaskStatus | None = None,
+        only_unassigned: bool = False,
+        assignee_id: int | None = None,
+    ) -> _DateFilter | None:
         parsed = self._extract_date_value(query)
         if parsed is None:
             return None
         query_words = set(self._normalize_text(query).split())
-        if query_words & {"planned", "assigned", "scheduled", "schedule"}:
+        if "due" in query_words or "expected" in query_words:
+            field = "due"
+        elif status_filter == TaskStatus.COMPLETED or self._is_completed_query(query):
+            field = "completed"
+        elif query_words & {"planned", "assigned", "scheduled", "schedule", "have", "had"} or assignee_id is not None:
             field = "assignment"
-        elif "due" in query_words:
+        elif only_unassigned:
             field = "due"
         else:
             field = "either"
@@ -767,7 +859,7 @@ class AppAssistantService:
                 return None
 
         day_month = re.search(
-            r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+(20\d{2}))?\b",
+            r"\b(\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+(20\d{2}))?\b",
             query,
         )
         if day_month:
@@ -800,6 +892,8 @@ class AppAssistantService:
             return task.due_date == date_filter.value
         if date_filter.field == "assignment":
             return task.assignment_date == date_filter.value
+        if date_filter.field == "completed":
+            return task.completed_at is not None and task.completed_at.date() == date_filter.value
         return task.due_date == date_filter.value or task.assignment_date == date_filter.value
 
     @staticmethod
@@ -836,17 +930,19 @@ class AppAssistantService:
 
     @staticmethod
     def _extract_effort(query: str) -> EffortLevel | None:
-        if "high" in query:
+        words = set(AppAssistantService._normalize_text(query).split())
+        if "high" in words:
             return EffortLevel.HIGH
-        if "medium" in query:
+        if "medium" in words:
             return EffortLevel.MEDIUM
-        if "low" in query:
+        if "low" in words:
             return EffortLevel.LOW
         return None
 
     @staticmethod
     def _is_capacity_query(query: str) -> bool:
-        return "capacity" in query or "room" in query or "available" in query
+        words = set(AppAssistantService._normalize_text(query).split())
+        return bool(words & {"capacity", "room", "available"})
 
     @staticmethod
     def _is_assign_me_query(query: str) -> bool:
@@ -900,20 +996,53 @@ class AppAssistantService:
     def _extract_status(query: str) -> TaskStatus | None:
         if "in progress" in query:
             return TaskStatus.IN_PROGRESS
-        if "not done" in query or "not completed" in query:
+        if AppAssistantService._is_incomplete_query(query):
             return None
-        if "completed" in query or "done" in query:
+        if AppAssistantService._is_completed_query(query):
             return TaskStatus.COMPLETED
         if "pending" in query:
             return TaskStatus.PENDING
         return None
 
     @staticmethod
-    def _active_only(*, query: str, status_filter: TaskStatus | None) -> bool:
+    def _is_incomplete_query(query: str) -> bool:
+        return any(
+            marker in query
+            for marker in (
+                "not done",
+                "not completed",
+                "not complete",
+                "not finished",
+                "incomplete",
+                "unfinished",
+            )
+        )
+
+    @staticmethod
+    def _is_completed_query(query: str) -> bool:
+        if AppAssistantService._is_incomplete_query(query):
+            return False
+        return any(marker in query for marker in ("completed", "complete", "done", "finished", "finish"))
+
+    @staticmethod
+    def _active_only(
+        *,
+        query: str,
+        status_filter: TaskStatus | None,
+        date_filter: _DateFilter | None = None,
+    ) -> bool:
         if status_filter is not None:
             return False
         if "include completed" in query or "with completed" in query:
             return False
+        if date_filter is not None and date_filter.field == "completed":
+            return False
+        if date_filter is not None and date_filter.field in {"assignment", "either"}:
+            normalized = AppAssistantService._normalize_text(query)
+            words = set(normalized.split())
+            historical_wording = "had" in words or ("did" in words and "have" in words)
+            if date_filter.value < date.today() or historical_wording:
+                return False
         return True
 
     @staticmethod
@@ -938,6 +1067,27 @@ class AppAssistantService:
             "remove task",
             "edit task",
             "change task",
+            "complete it",
+            "complete task",
+            "complete tasks",
+            "complete the task",
+            "complete this task",
+            "finish it",
+            "finish task",
+            "finish tasks",
+            "finish the task",
+            "finish this task",
+            "mark it complete",
+            "mark it completed",
+            "mark it done",
+            "mark task",
+            "mark this task",
+            "mark as complete",
+            "mark as completed",
+            "mark as done",
+            "mark done",
+            "set task done",
+            "set this task done",
         )
         return any(marker in query for marker in write_markers)
 
@@ -950,7 +1100,10 @@ class AppAssistantService:
     @staticmethod
     def _is_team_scope_query(query: str) -> bool:
         normalized = AppAssistantService._normalize_text(query)
-        return any(marker in normalized for marker in ("team", "everyone", "everybody", "all tasks", "all members", "shared"))
+        return normalized.startswith("who ") or any(
+            marker in normalized
+            for marker in ("team", "everyone", "everybody", "all tasks", "all members", "shared")
+        )
 
     @staticmethod
     def _extract_reference_index(query: str) -> int | None:

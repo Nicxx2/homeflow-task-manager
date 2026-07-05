@@ -45,6 +45,7 @@ class Task(Base):
         server_default=TaskStatus.PENDING.value,
         index=True,
     )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     ai_suggested_level: Mapped[EffortLevel | None] = mapped_column(
         effort_level_sa_enum,
         nullable=True,

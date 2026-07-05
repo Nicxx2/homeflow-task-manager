@@ -1,5 +1,8 @@
 {% set current_quick_assignee_id = quick_schedule_selected_assignee_id if quick_schedule_selected_assignee_id is defined and quick_schedule_selected_assignee_id is not none else task.assignee_id %}
-{% set current_quick_assignment_date = quick_schedule_assignment_date if quick_schedule_assignment_date is defined and quick_schedule_assignment_date else ((task.assignment_date or today_iso) | string) %}
+{% set quick_schedule_today_text = today_iso if today_iso is defined else (today | string) %}
+{% set task_assignment_text = (task.assignment_date | string) if task.assignment_date else "" %}
+{% set fallback_quick_assignment_date = task.assignment_date if task_assignment_text and task_assignment_text >= quick_schedule_today_text else quick_schedule_today_text %}
+{% set current_quick_assignment_date = quick_schedule_assignment_date if quick_schedule_assignment_date is defined and quick_schedule_assignment_date else (fallback_quick_assignment_date | string) %}
 <div id="quick-schedule-shell-{{ task.id }}">
   <button
     type="button"

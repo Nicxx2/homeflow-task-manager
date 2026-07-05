@@ -196,7 +196,7 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.6.2
+## What is new in v2.6.3
 
 - Ask AI now handles more task and capacity questions with safer filtering for active, completed, personal, team, unassigned, dated, and member-specific tasks.
 - Ask AI remains safe by default: task creation, moving, editing, and deletion are kept in the normal task forms and Planner flows where confirmations and capacity checks already exist.

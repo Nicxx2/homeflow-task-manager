@@ -97,6 +97,18 @@ def _authed_client(user):
     return client
 
 
+def _dashboard_member_section(html: str, full_name: str) -> str:
+    name_index = html.index(full_name)
+    marker = '<p class="app-user-accent text-sm font-medium">'
+    start = html.rfind(marker, 0, name_index)
+    end = html.find(marker, name_index + len(full_name))
+    if start == -1:
+        start = name_index
+    if end == -1:
+        end = len(html)
+    return html[start:end]
+
+
 def test_non_admin_dashboard_shows_team_workload():
     db = SessionLocal()
     try:
@@ -244,10 +256,10 @@ def test_dashboard_marks_exact_capacity_as_full():
         response = client.get("/dashboard")
 
         assert response.status_code == 200
-        assert "Dashboard Full Mate" in response.text
-        assert "Full" in response.text
-        assert "Nearly full" not in response.text
-        assert "Remaining: 0 pts left" in response.text
+        section = _dashboard_member_section(response.text, "Dashboard Full Mate")
+        assert "Full" in section
+        assert "Nearly full" not in section
+        assert "Remaining: 0 pts left" in section
     finally:
         db.close()
 
@@ -278,8 +290,9 @@ def test_dashboard_hides_next_task_when_all_tasks_for_today_are_completed():
         response = client.get("/dashboard")
 
         assert response.status_code == 200
-        assert f"Finished {token}" in response.text
-        assert "Next task:" not in response.text
+        section = _dashboard_member_section(response.text, "Dashboard All Complete Mate")
+        assert "1 task today" in section
+        assert "Next task:" not in section
     finally:
         db.close()
 
@@ -1010,8 +1023,9 @@ def test_creator_can_delete_recurring_task_and_history_snapshots():
         )
         TaskService(db).assign_task(task, assignee_id=creator.id, assignment_date=due_day)
         TaskService(db).update_status(task, TaskStatus.COMPLETED)
+        task_id = task.id
 
-        history_count = db.query(Task).filter(Task.recurrence_parent_id == task.id).count()
+        history_count = db.query(Task).filter(Task.recurrence_parent_id == task_id).count()
         assert history_count == 1
 
         response = _authed_client(creator).post(
@@ -1022,7 +1036,8 @@ def test_creator_can_delete_recurring_task_and_history_snapshots():
 
         assert response.status_code == 302
         assert response.headers["location"] == "/tasks"
-        assert db.get(Task, task.id) is None
+        db.expire_all()
+        assert db.get(Task, task_id) is None
         preserved_history = (
             db.query(Task)
             .filter(
@@ -1082,6 +1097,7 @@ def test_creator_can_delete_only_current_recurring_occurrence_and_keep_series():
         assert response.status_code == 302
         assert response.headers["location"] == "/tasks"
 
+        db.expire_all()
         updated_task = db.get(Task, original_id)
         assert updated_task is not None
         assert updated_task.due_date == due_day + timedelta(weeks=1)
@@ -1140,6 +1156,7 @@ def test_creator_can_delete_final_recurring_occurrence_and_keep_completed_histor
 
         assert response.status_code == 302
         assert response.headers["location"] == "/tasks"
+        db.expire_all()
         assert db.get(Task, root_id) is None
 
         preserved_history = (
@@ -1181,11 +1198,13 @@ def test_user_can_save_schedule_preferences_and_away_periods():
             },
             follow_redirects=False,
         )
+        away_start = date.today() + timedelta(days=10)
+        away_end = away_start + timedelta(days=2)
         away_response = client.post(
             "/schedule/away",
             data={
-                "start_date": "2026-04-20",
-                "end_date": "2026-04-22",
+                "start_date": away_start.isoformat(),
+                "end_date": away_end.isoformat(),
                 "note": "Trip",
             },
             follow_redirects=False,
@@ -1232,6 +1251,13 @@ def test_user_can_save_personal_appearance_without_affecting_others():
                 "recurring_color": "#117766",
                 "in_progress_color": "#bb7700",
                 "unassigned_color": "#334455",
+                "task_category_button_color_mode": "match",
+                "task_category_overdue_color": "#dc2626",
+                "task_category_up_next_color": "#4f46e5",
+                "task_category_later_color": "#0f766e",
+                "task_category_unassigned_color": "#475569",
+                "task_category_in_progress_color": "#d97706",
+                "task_category_completed_color": "#64748b",
                 "surface_style": "soft",
                 "density_preference": "compact",
                 "decoration_style": "glow",
@@ -1281,6 +1307,13 @@ def test_invalid_appearance_color_is_rejected():
                 "recurring_color": "#0f766e",
                 "in_progress_color": "#d97706",
                 "unassigned_color": "#475569",
+                "task_category_button_color_mode": "match",
+                "task_category_overdue_color": "#dc2626",
+                "task_category_up_next_color": "#4f46e5",
+                "task_category_later_color": "#0f766e",
+                "task_category_unassigned_color": "#475569",
+                "task_category_in_progress_color": "#d97706",
+                "task_category_completed_color": "#64748b",
                 "surface_style": "clean",
                 "density_preference": "comfortable",
                 "decoration_style": "none",
@@ -1382,8 +1415,8 @@ def test_task_highlight_is_personal_only():
         )
         assert save_response.status_code == 302
 
-        viewer_tasks = viewer_client.get("/tasks")
-        other_tasks = _authed_client(other).get("/tasks")
+        viewer_tasks = viewer_client.get("/tasks?view=unassigned")
+        other_tasks = _authed_client(other).get("/tasks?view=unassigned")
 
         assert viewer_tasks.status_code == 200
         assert other_tasks.status_code == 200
@@ -1407,18 +1440,18 @@ def test_past_away_periods_are_removed_automatically():
         scheduling = SchedulingService(db)
         scheduling.add_away_period(
             user_id=viewer.id,
-            start_date=date(2026, 4, 1),
-            end_date=date(2026, 4, 2),
+            start_date=date.today() - timedelta(days=4),
+            end_date=date.today() - timedelta(days=3),
             note="Past trip",
         )
         scheduling.add_away_period(
             user_id=viewer.id,
-            start_date=date(2026, 4, 20),
-            end_date=date(2026, 4, 22),
+            start_date=date.today() + timedelta(days=10),
+            end_date=date.today() + timedelta(days=12),
             note="Upcoming trip",
         )
 
-        removed = scheduling.purge_expired_away_periods(user_id=viewer.id, reference_date=date(2026, 4, 10))
+        removed = scheduling.purge_expired_away_periods(user_id=viewer.id, reference_date=date.today())
         periods = scheduling.list_away_periods(viewer.id)
 
         assert removed == 1
@@ -1447,18 +1480,19 @@ def test_admin_can_override_blocked_schedule_date():
             full_name="Schedule Member",
             capacity=10,
         )
+        blocked_day = date.today() + timedelta(days=3)
         scheduling = SchedulingService(db)
         scheduling.add_away_period(
             user_id=member.id,
-            start_date=date(2026, 4, 18),
-            end_date=date(2026, 4, 18),
+            start_date=blocked_day,
+            end_date=blocked_day,
             note="Away day",
         )
         task = TaskService(db).create_unassigned_task(
             TaskCreate(
                 title=f"Override Task {token}",
                 description="Admin override test",
-                due_date=date(2026, 4, 18),
+                due_date=blocked_day,
                 effort_level=EffortLevel.LOW,
                 ai_suggested_level=EffortLevel.LOW,
                 ai_confidence=0.7,
@@ -1473,14 +1507,14 @@ def test_admin_can_override_blocked_schedule_date():
         client = _authed_client(admin)
         blocked = client.post(
             f"/tasks/{task.id}/assign",
-            data={"assignee_id": member.id, "assignment_date": "2026-04-18"},
+            data={"assignee_id": member.id, "assignment_date": blocked_day.isoformat()},
             follow_redirects=False,
         )
         allowed = client.post(
             f"/tasks/{task.id}/assign",
             data={
                 "assignee_id": member.id,
-                "assignment_date": "2026-04-18",
+                "assignment_date": blocked_day.isoformat(),
                 "allow_policy_override": "true",
             },
             follow_redirects=False,
@@ -1590,7 +1624,7 @@ def test_assignee_can_open_task_and_update_status():
         assert detail_response.status_code == 200
         assert 'name="status_value"' in detail_response.text
 
-        tasks_response = client.get("/tasks")
+        tasks_response = client.get("/tasks?view=later")
         assert tasks_response.status_code == 200
         assert f"Assigned Task {token}" in tasks_response.text
 
@@ -1642,7 +1676,7 @@ def test_unrelated_user_can_open_task_but_cannot_quick_update_status():
         edit_response = client.get(f"/tasks/{task.id}/edit")
         assert edit_response.status_code == 200
 
-        tasks_response = client.get("/tasks")
+        tasks_response = client.get("/tasks?scope=team&view=later")
         assert tasks_response.status_code == 200
         assert f"Private Task {token}" in tasks_response.text
 
@@ -1918,7 +1952,7 @@ def test_task_create_page_allows_past_due_dates():
         )
 
         client = _authed_client(viewer)
-        response = client.get("/tasks/create")
+        response = client.get("/tasks/new")
 
         assert response.status_code == 200
         due_input = re.search(r'<input id="task_due_date"[^>]+>', response.text)
@@ -1997,11 +2031,13 @@ def test_quick_schedule_uses_today_for_past_assignment_dates():
 
         assert response.status_code == 200
         assignment_input = re.search(
-            rf'<input[^>]+id="quick-assignment-date-{task.id}"[^>]+value="([^"]+)"',
+            rf'<input(?=[^>]*id="quick-assignment-date-{task.id}")[^>]*>',
             response.text,
         )
         assert assignment_input is not None
-        assert assignment_input.group(1) == date.today().isoformat()
+        value_match = re.search(r'value="([^"]+)"', assignment_input.group(0))
+        assert value_match is not None
+        assert value_match.group(1) == date.today().isoformat()
     finally:
         db.close()
 
