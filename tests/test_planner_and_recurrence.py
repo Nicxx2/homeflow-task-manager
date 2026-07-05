@@ -716,6 +716,33 @@ def test_planner_page_renders_separate_touch_ready_view():
         db.close()
 
 
+def test_planner_month_mobile_summary_keeps_counts_inside_day_cell():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db)
+        target = date.today() + timedelta(days=14)
+        for index in range(4):
+            _create_assigned_task(
+                db,
+                creator=user,
+                assignee=user,
+                title=f"Month mobile task {index} {uuid4().hex[:6]}",
+                day=target,
+            )
+
+        response = _authed_client(user).get(f"/planner?view=month&start={target.isoformat()}")
+
+        assert response.status_code == 200
+        assert 'class="pb-36 sm:pb-24"' in response.text
+        assert "overflow-hidden rounded-md border border-t-4" in response.text
+        assert "mt-1 hidden space-y-1 sm:block" in response.text
+        assert "4 tasks" in response.text
+        assert "+1 more" in response.text
+    finally:
+        db.close()
+
+
 def test_planner_member_filter_shows_only_selected_visible_member():
     db = SessionLocal()
     try:

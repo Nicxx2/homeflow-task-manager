@@ -38,3 +38,6 @@ mobile/app/android/*.iml
 
 agent-transcripts/
 terminals/
+
+# Codex local attachments
+.codex-remote-attachments/

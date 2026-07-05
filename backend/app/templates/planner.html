@@ -89,7 +89,7 @@
   data-filter-query="{{ filter_query }}"
   {% if selected_member_id %}data-selected-member-id="{{ selected_member_id }}"{% endif %}
   data-default-assignee-id="{{ planner_default_assignee_id or '' }}"
-  class="pb-24"
+  class="pb-36 sm:pb-24"
 >
   <header class="density-header mb-5">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -213,19 +213,21 @@
     {% for day in days %}
     <article
       data-planner-drop-date="{{ day.date.isoformat() }}"
-      class="planner-capacity-{{ day.tone }} app-surface min-h-24 rounded-md border border-t-4 p-1.5 {% if day.date.month != focus_month %}opacity-50{% endif %} sm:min-h-32 sm:p-2"
+      class="planner-capacity-{{ day.tone }} app-surface min-h-24 overflow-hidden rounded-md border border-t-4 p-1 {% if day.date.month != focus_month %}opacity-50{% endif %} sm:min-h-32 sm:p-2"
     >
-      <div class="flex items-center justify-between gap-1">
-        <span class="text-xs font-semibold {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }}</span>
-        <div class="flex items-center gap-1">
-          {% if not day.is_past %}
-          <button type="button" data-planner-create-open data-create-date="{{ day.date.isoformat() }}" class="rounded border border-slate-300 px-1.5 py-0.5 text-[9px] hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" aria-label="Create task on {{ day.date.strftime('%A %d %B') }}">+</button>
-          {% endif %}
-          <span class="text-[9px] text-slate-500 dark:text-slate-400">{% if day.capacity is none %}{{ day.points }}{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}</span>
-        </div>
+      <div class="flex items-start justify-between gap-0.5 sm:gap-1">
+        <span class="text-[11px] font-semibold sm:text-xs {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }}</span>
+        {% if not day.is_past %}
+        <button type="button" data-planner-create-open data-create-date="{{ day.date.isoformat() }}" class="h-5 w-5 shrink-0 rounded border border-slate-300 text-[10px] leading-none hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 sm:h-6 sm:w-6 sm:text-[11px]" aria-label="Create task on {{ day.date.strftime('%A %d %B') }}">+</button>
+        {% endif %}
       </div>
-      <p class="mt-2 text-[9px] text-slate-500 dark:text-slate-400 sm:hidden">{{ day.tasks|length }} task{{ "" if day.tasks|length == 1 else "s" }}</p>
-      <div class="mt-1 space-y-1">
+      <div class="mt-2 flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <span class="inline-flex max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-slate-300/70 px-1 py-0.5 text-[9px] leading-none text-slate-500 dark:border-slate-700 dark:text-slate-400 sm:px-1.5">
+          {% if day.capacity is none %}{{ day.points }} pts{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}
+        </span>
+        <span class="text-[9px] text-slate-500 dark:text-slate-400 sm:hidden">{{ day.tasks|length }} task{{ "" if day.tasks|length == 1 else "s" }}</span>
+      </div>
+      <div class="mt-1 hidden space-y-1 sm:block">
         {% for task in day.tasks %}
           {% if loop.index <= 3 %}{{ planner_task(task, true) }}{% endif %}
         {% endfor %}
