@@ -98,3 +98,22 @@ class OllamaProvider(BaseAIProvider):
             )
             response.raise_for_status()
             return {"ok": True, "status": "healthy", "message": f"Model '{model}' responded."}
+
+    def generate_json(self, *, prompt: str, model: str, timeout_seconds: int, max_tokens: int = 220) -> dict:
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0.0,
+                "top_p": 0.8,
+                "num_predict": max_tokens,
+            },
+        }
+        raw_text = self._post_generate(
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            min_read_seconds=max(2, min(timeout_seconds, 8)),
+        )
+        return safe_parse_json_object(raw_text)

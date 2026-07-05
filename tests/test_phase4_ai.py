@@ -250,11 +250,22 @@ def test_model_discovery_registry_update():
         db.close()
 
 
+def test_ollama_provider_general_json_generation():
+    from backend.app.ai.providers.ollama import OllamaProvider
+
+    client = MockHttpClient([MockResponse(200, {"response": '{"intent":"list_tasks","confidence":0.9}'})])
+    provider = OllamaProvider(base_url="http://x", client_factory=lambda timeout: client)
+
+    result = provider.generate_json(prompt="Return intent JSON", model="m", timeout_seconds=3)
+
+    assert result == {"intent": "list_tasks", "confidence": 0.9}
+
+
 def test_invalid_json_handling_in_ollama_provider():
     from backend.app.ai.providers.ollama import OllamaProvider
 
     response = MockResponse(200, {"response": "not-json"})
-    client = MockHttpClient([response, MockResponse(200, {"response": '{"suggested_level":"low","confidence":0.7,"reason":"ok"}'})])
+    client = MockHttpClient([response, MockResponse(200, {"response": '{"suggested_level":"low","confidence":0.7,"reason":"okay"}'})])
     provider = OllamaProvider(base_url="http://x", client_factory=lambda timeout: client)
     result = provider.classify_task(title="A", description="B", model="m", timeout_seconds=3)
     assert result.suggested_level == EffortLevel.LOW

@@ -196,7 +196,16 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.6.0
+## What is new in v2.6.1
+
+- Ask AI now handles more task and capacity questions with safer filtering for active, completed, personal, team, unassigned, dated, and member-specific tasks.
+- Ask AI remains safe by default: task creation, moving, editing, and deletion are kept in the normal task forms and Planner flows where confirmations and capacity checks already exist.
+- Hybrid AI support can use Ollama for harder wording while still falling back to rule-based answers when AI is disabled, unavailable, or set to rules only.
+- Planner member filtering is clearer with a non-selectable member placeholder, reducing accidental filter confusion.
+- Planner now includes quick task creation from a selected day, with assignee choice, optional recurring settings, capacity review, and self extra-capacity confirmation when needed.
+- Tasks and Day View now support member-specific filters for quickly checking one person's work without changing the main views.
+
+### Also added in v2.6.0
 
 - New web Planner view for week and month planning, with quick task moves and a mobile-friendly date picker flow.
 - Planner capacity checks protect shared schedules, so team tasks cannot be moved into a full day unless the rules allow it.
@@ -282,7 +291,8 @@ Each user can personalize their own view without changing the experience for any
 
 - Runs locally with Ollama
 - No external AI API required
-- Falls back safely to rules when AI is unavailable
+- Ask AI can answer common task and capacity questions from app rules even without Ollama
+- Hybrid Ask AI can use Ollama for harder wording while still falling back safely to rules
 - Includes a built-in assistant for app-specific workload and task queries
 
 ### Mobile companion app

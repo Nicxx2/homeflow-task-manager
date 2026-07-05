@@ -699,10 +699,17 @@ def test_planner_page_renders_separate_touch_ready_view():
         assert 'data-planner-date-strip' in response.text
         assert 'data-planner-date-scroll="1"' in response.text
         assert 'data-planner-date-scroll="-1"' in response.text
+        assert 'data-planner-create-open' in response.text
+        assert 'data-planner-create-modal' in response.text
+        assert 'data-default-assignee-id' in response.text
+        assert '/planner/tasks/preview' in response.text
+        assert 'name="repeat_weekly"' in response.text
+        assert 'name="recurrence_late_behavior"' in response.text
         assert 'bottom-3 z-50' in response.text
         assert 'planner-selection-active #assistant-toggle' in response.text
         assert f'data-assignment-date="{(today + timedelta(days=21)).isoformat()}"' in response.text
         assert 'name="member_id"' in response.text
+        assert '<option value="" disabled selected>Choose member</option>' in response.text
         assert f'href="/planner?view=month&start={today.isoformat()}&scope=mine"' in response.text
         assert 'href="/planner"' in response.text
     finally:
@@ -750,6 +757,279 @@ def test_planner_member_filter_rejects_hidden_member():
     finally:
         db.close()
 
+
+def test_planner_quick_create_assigns_visible_member_when_capacity_fits():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=6)
+        target = date.today() + timedelta(days=2)
+        client = _authed_client(user)
+        payload = {
+            "title": "Quick planner task",
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.LOW.value,
+            "assignee_id": user.id,
+        }
+
+        preview = client.post("/planner/tasks/preview", json=payload)
+        create = client.post("/planner/tasks/create", json=payload)
+        task = db.get(Task, create.json()["task_id"])
+
+        assert preview.status_code == 200
+        assert preview.json()["ok"] is True
+        assert create.status_code == 200
+        assert create.json()["created"] is True
+        assert task.assignee_id == user.id
+        assert task.assignment_date == target
+        assert task.due_date == target
+        assert task.recurrence_pattern is None
+    finally:
+        db.close()
+
+
+def test_planner_quick_create_can_create_recurring_task():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=6)
+        target = date.today() + timedelta(days=2)
+        client = _authed_client(user)
+        payload = {
+            "title": f"Recurring planner quick {uuid4().hex[:6]}",
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.LOW.value,
+            "assignee_id": user.id,
+            "repeat_weekly": True,
+            "recurrence_interval_weeks": 2,
+            "recurrence_until": (target + timedelta(weeks=8)).isoformat(),
+            "recurrence_count_limit": 3,
+            "recurrence_blocked_behavior": "move_same_week",
+            "recurrence_late_behavior": "from_completion",
+        }
+
+        preview = client.post("/planner/tasks/preview", json=payload)
+        create = client.post("/planner/tasks/create", json=payload)
+        task = db.get(Task, create.json()["task_id"])
+
+        assert preview.status_code == 200
+        assert preview.json()["ok"] is True
+        assert preview.json()["repeat_weekly"] is True
+        assert "Repeats every 2 weeks" in preview.json()["recurrence_summary"]
+        assert create.status_code == 200
+        assert task.recurrence_pattern == "weekly"
+        assert task.recurrence_interval_weeks == 2
+        assert task.recurrence_until == target + timedelta(weeks=8)
+        assert task.recurrence_count_limit == 3
+        assert task.recurrence_blocked_behavior == "move_same_week"
+        assert task.recurrence_late_behavior == "from_completion"
+        assert task.recurrence_anchor_date == target
+        assert task.recurrence_occurrence_index == 0
+        assert task.assignee_id == user.id
+        assert task.assignment_date == target
+    finally:
+        db.close()
+
+
+def test_planner_quick_create_rejects_invalid_recurrence_values():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=6)
+        target = date.today() + timedelta(days=2)
+        client = _authed_client(user)
+        payload = {
+            "title": f"Invalid recurring planner quick {uuid4().hex[:6]}",
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.LOW.value,
+            "assignee_id": user.id,
+            "repeat_weekly": True,
+            "recurrence_interval_weeks": 0,
+        }
+        until_before_start = {
+            **payload,
+            "recurrence_interval_weeks": 1,
+            "recurrence_until": (target - timedelta(days=1)).isoformat(),
+        }
+
+        zero_interval = client.post("/planner/tasks/preview", json=payload)
+        bad_until = client.post("/planner/tasks/preview", json=until_before_start)
+
+        assert zero_interval.status_code == 422
+        assert bad_until.status_code == 422
+    finally:
+        db.close()
+
+def test_planner_quick_create_allows_unassigned_task_without_capacity_check():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=2)
+        target = date.today() + timedelta(days=2)
+        client = _authed_client(user)
+        title = f"Unassigned planner quick {uuid4().hex[:6]}"
+        payload = {
+            "title": title,
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.HIGH.value,
+            "assignee_id": None,
+            "add_extra_capacity": True,
+        }
+
+        preview = client.post("/planner/tasks/preview", json=payload)
+        create = client.post("/planner/tasks/create", json=payload)
+        task = db.get(Task, create.json()["task_id"])
+        override = db.get(UserDailyCapacityOverride, {"user_id": user.id, "override_date": target})
+
+        assert preview.status_code == 200
+        assert preview.json()["ok"] is True
+        assert preview.json()["members"] == []
+        assert create.status_code == 200
+        assert task.assignee_id is None
+        assert task.assignment_date is None
+        assert task.due_date == target
+        assert override is None
+    finally:
+        db.close()
+
+def test_planner_quick_create_rejects_other_member_over_capacity_even_with_extra_flag():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db, capacity=10)
+        teammate = _create_user(db, capacity=2)
+        target = date.today() + timedelta(days=3)
+        _create_assigned_task(db, creator=viewer, assignee=teammate, title="Fills teammate", day=target)
+        client = _authed_client(viewer)
+        payload = {
+            "title": "Blocked teammate quick task",
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.LOW.value,
+            "assignee_id": teammate.id,
+            "add_extra_capacity": True,
+        }
+
+        preview = client.post("/planner/tasks/preview", json=payload)
+        create = client.post("/planner/tasks/create", json=payload)
+
+        assert preview.status_code == 400
+        assert preview.json()["can_add_extra_capacity"] is False
+        assert create.status_code == 400
+        assert db.query(Task).filter(Task.title == "Blocked teammate quick task").count() == 0
+    finally:
+        db.close()
+
+
+def test_planner_quick_create_self_can_add_extra_capacity_after_review():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=2)
+        target = date.today() + timedelta(days=4)
+        _create_assigned_task(db, creator=user, assignee=user, title="Fills my day", day=target)
+        client = _authed_client(user)
+        payload = {
+            "title": "Extra capacity quick task",
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.LOW.value,
+            "assignee_id": user.id,
+        }
+
+        preview = client.post("/planner/tasks/preview", json=payload)
+        create = client.post("/planner/tasks/create", json={**payload, "add_extra_capacity": True})
+        task = db.get(Task, create.json()["task_id"])
+        override = db.get(UserDailyCapacityOverride, {"user_id": user.id, "override_date": target})
+
+        assert preview.status_code == 200
+        assert preview.json()["ok"] is False
+        assert preview.json()["can_add_extra_capacity"] is True
+        assert preview.json()["extra_capacity_required"] == 2
+        assert create.status_code == 200
+        assert create.json()["extra_capacity_added"] == 2
+        assert task.assignee_id == user.id
+        assert task.assignment_date == target
+        assert override is not None
+        assert override.extra_capacity_points == 2
+    finally:
+        db.close()
+
+def test_planner_quick_create_rejects_hidden_assignee_and_past_date():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db, capacity=10)
+        hidden = _create_user(db, capacity=10, show_in_member_lists=False)
+        future = date.today() + timedelta(days=2)
+        past = date.today() - timedelta(days=1)
+        client = _authed_client(viewer)
+        hidden_title = f"Hidden quick task {uuid4().hex[:6]}"
+        past_title = f"Past quick task {uuid4().hex[:6]}"
+
+        hidden_response = client.post(
+            "/planner/tasks/create",
+            json={
+                "title": hidden_title,
+                "assignment_date": future.isoformat(),
+                "due_date": future.isoformat(),
+                "effort_level": EffortLevel.LOW.value,
+                "assignee_id": hidden.id,
+            },
+        )
+        past_response = client.post(
+            "/planner/tasks/create",
+            json={
+                "title": past_title,
+                "assignment_date": past.isoformat(),
+                "due_date": past.isoformat(),
+                "effort_level": EffortLevel.LOW.value,
+                "assignee_id": viewer.id,
+            },
+        )
+
+        assert hidden_response.status_code == 400
+        assert "Choose an active visible member." in hidden_response.json()["errors"]
+        assert past_response.status_code == 400
+        assert "New Planner tasks cannot be assigned to a past date." in past_response.json()["errors"]
+        assert db.query(Task).filter(Task.title.in_([hidden_title, past_title])).count() == 0
+    finally:
+        db.close()
+
+
+def test_planner_quick_create_self_extra_capacity_adds_to_existing_override():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=2)
+        target = date.today() + timedelta(days=5)
+        db.add(UserDailyCapacityOverride(user_id=user.id, override_date=target, extra_capacity_points=1))
+        db.commit()
+        _create_assigned_task(db, creator=user, assignee=user, title=f"Existing override filler {uuid4().hex[:6]}", day=target)
+        client = _authed_client(user)
+        payload = {
+            "title": f"Existing override quick {uuid4().hex[:6]}",
+            "assignment_date": target.isoformat(),
+            "due_date": target.isoformat(),
+            "effort_level": EffortLevel.LOW.value,
+            "assignee_id": user.id,
+        }
+
+        preview = client.post("/planner/tasks/preview", json=payload)
+        create = client.post("/planner/tasks/create", json={**payload, "add_extra_capacity": True})
+        override = db.get(UserDailyCapacityOverride, {"user_id": user.id, "override_date": target})
+
+        assert preview.status_code == 200
+        assert preview.json()["extra_capacity_required"] == 1
+        assert create.status_code == 200
+        assert create.json()["extra_capacity_added"] == 1
+        assert override.extra_capacity_points == 2
+    finally:
+        db.close()
 
 def test_repeated_web_completion_with_stale_occurrence_token_is_noop():
     db = SessionLocal()

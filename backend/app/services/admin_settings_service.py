@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.ai.services.orchestrator import AIOrchestratorService
@@ -228,14 +228,13 @@ class AdminSettingsService:
             if int(remaining_admins or 0) == 0:
                 raise ValueError("At least one admin account must remain.")
 
-        for task in self.db.scalars(select(Task).where(Task.created_by_id == user.id)).all():
-            task.created_by_id = acting_admin_id
-            self.db.add(task)
-
-        for task in self.db.scalars(select(Task).where(Task.assignee_id == user.id)).all():
-            task.assignee_id = None
-            task.assignment_date = None
-            self.db.add(task)
+        self.db.execute(update(Task).where(Task.created_by_id == user.id).values(created_by_id=acting_admin_id))
+        self.db.execute(
+            update(Task)
+            .where(Task.assignee_id == user.id)
+            .values(assignee_id=None, assignment_date=None)
+        )
+        self.db.flush()
 
         capacity = self.db.get(UserDailyCapacity, user.id)
         if capacity:

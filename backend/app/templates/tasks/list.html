@@ -1,30 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
 <header class="density-header mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-  <div>
+  <div class="min-w-0 md:max-w-2xl">
     <h1 class="text-2xl font-semibold">Tasks</h1>
     <p class="text-slate-500 dark:text-slate-400">
       {% if scope == "mine" %}
         Keep this view personal and focused. Pick one category at a time so the page stays easy to scan.
+      {% elif scope == "member" and selected_member %}
+        Showing tasks assigned to {{ selected_member.full_name }}.
       {% else %}
         Team task view keeps the work organized by one selected category at a time.
       {% endif %}
     </p>
   </div>
-  <div class="flex flex-col items-start gap-3 md:items-end">
-    <div class="flex items-center gap-2">
+  <div class="flex flex-col items-start gap-3 md:shrink-0 md:items-end">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
       <a
         href="/tasks?scope=mine&view={{ selected_view }}"
-        class="inline-flex min-w-[7.5rem] items-center justify-center whitespace-nowrap rounded-md px-4 py-2 text-sm {% if scope == 'mine' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
-      >
-        Just mine
-      </a>
+        class="inline-flex min-w-[6.5rem] items-center justify-center whitespace-nowrap rounded-md px-3 py-2 text-sm {% if scope == 'mine' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+      >Mine</a>
       <a
         href="/tasks?scope=team&view={{ selected_view }}"
-        class="inline-flex min-w-[7.5rem] items-center justify-center whitespace-nowrap rounded-md px-4 py-2 text-sm {% if scope == 'team' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
-      >
-        Everyone
-      </a>
+        class="inline-flex min-w-[6.5rem] items-center justify-center whitespace-nowrap rounded-md px-3 py-2 text-sm {% if scope == 'team' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+      >Everyone</a>
+      <form method="get" action="/tasks" class="min-w-0 sm:w-48">
+        <input type="hidden" name="view" value="{{ selected_view }}" />
+        <input type="hidden" name="scope" value="member" />
+        <label for="tasks-member-filter" class="sr-only">Tasks member</label>
+        <select
+          id="tasks-member-filter"
+          name="member_id"
+          class="app-select w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+          onchange="if (this.value) this.form.submit();"
+        >
+          <option value="" disabled {% if not selected_member_id %}selected{% endif %}>Choose member</option>
+          {% for member in visible_members %}
+          <option value="{{ member.id }}" {% if selected_member_id == member.id %}selected{% endif %}>{{ member.full_name }}</option>
+          {% endfor %}
+        </select>
+      </form>
     </div>
     <a href="/tasks/new" class="app-primary-button rounded-md px-4 py-2">New Task</a>
   </div>
@@ -61,7 +75,7 @@
     {% endif %}
   {% endif %}
   <a
-    href="/tasks?scope={{ scope }}&view={{ item.key }}"
+    href="/tasks?{{ filter_query }}&view={{ item.key }}"
     class="density-panel rounded-xl border p-4 transition duration-200 hover:-translate-y-0.5 {% if selected_view == item.key %}shadow-lg{% endif %}"
     style="
       border-color: color-mix(in srgb, {{ view_color }} 35%, var(--app-border));

@@ -314,11 +314,131 @@ def test_non_admin_day_view_can_toggle_between_team_and_mine():
 
         mine_response = client.get(f"/day-view?day={day.isoformat()}&scope=mine")
         assert mine_response.status_code == 200
-        assert "Toggle Mate" not in mine_response.text
         assert f"Other Task {token}" not in mine_response.text
     finally:
         db.close()
 
+
+def test_day_view_member_scope_shows_only_selected_visible_member_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"day-member-viewer-{token}@example.com",
+            full_name="Day Member Viewer",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"day-member-mate-{token}@example.com",
+            full_name="Day Member Mate",
+            capacity=10,
+        )
+        other = _create_user(
+            db,
+            email=f"day-member-other-{token}@example.com",
+            full_name="Day Member Other",
+            capacity=10,
+        )
+        hidden = _create_user(
+            db,
+            email=f"day-member-hidden-{token}@example.com",
+            full_name="Day Member Hidden",
+            capacity=10,
+            show_in_member_lists=False,
+        )
+        day = date.today() + timedelta(days=2)
+        selected_task = _create_task(db, creator=viewer, assignee=teammate, title=f"Selected Day Task {token}", day=day)
+        _create_task(db, creator=viewer, assignee=other, title=f"Other Day Task {token}", day=day)
+        _create_task(db, creator=viewer, assignee=hidden, title=f"Hidden Day Task {token}", day=day)
+        client = _authed_client(viewer)
+
+        response = client.get(f"/day-view?day={day.isoformat()}&scope=member&member_id={teammate.id}")
+        hidden_response = client.get(f"/day-view?day={day.isoformat()}&scope=member&member_id={hidden.id}")
+
+        assert response.status_code == 200
+        assert f'value="{teammate.id}" selected' in response.text
+        assert f"Selected Day Task {token}" in response.text
+        assert f"Other Day Task {token}" not in response.text
+        assert f"Hidden Day Task {token}" not in response.text
+        assert f'href="/tasks/{selected_task.id}"' in response.text
+        assert hidden_response.status_code == 404
+    finally:
+        db.close()
+
+
+def test_tasks_member_scope_shows_only_selected_member_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        token = uuid4().hex[:8]
+        viewer = _create_user(
+            db,
+            email=f"tasks-member-viewer-{token}@example.com",
+            full_name="Tasks Member Viewer",
+            capacity=10,
+        )
+        teammate = _create_user(
+            db,
+            email=f"tasks-member-mate-{token}@example.com",
+            full_name="Tasks Member Mate",
+            capacity=10,
+        )
+        other = _create_user(
+            db,
+            email=f"tasks-member-other-{token}@example.com",
+            full_name="Tasks Member Other",
+            capacity=10,
+        )
+        hidden = _create_user(
+            db,
+            email=f"tasks-member-hidden-{token}@example.com",
+            full_name="Tasks Member Hidden",
+            capacity=10,
+            show_in_member_lists=False,
+        )
+        tomorrow = date.today() + timedelta(days=1)
+        selected_task = _create_task(
+            db,
+            creator=viewer,
+            assignee=teammate,
+            title=f"Selected Member Task {token}",
+            due_date=tomorrow + timedelta(days=3),
+            assignment_date=tomorrow,
+        )
+        _create_task(
+            db,
+            creator=viewer,
+            assignee=other,
+            title=f"Other Member Task {token}",
+            due_date=tomorrow + timedelta(days=3),
+            assignment_date=tomorrow,
+        )
+        _create_task(
+            db,
+            creator=viewer,
+            assignee=hidden,
+            title=f"Hidden Member Task {token}",
+            due_date=tomorrow + timedelta(days=3),
+            assignment_date=tomorrow,
+        )
+        client = _authed_client(viewer)
+
+        response = client.get(f"/tasks?scope=member&member_id={teammate.id}&view=up_next")
+        hidden_response = client.get(f"/tasks?scope=member&member_id={hidden.id}&view=up_next")
+
+        assert response.status_code == 200
+        assert f'value="{teammate.id}" selected' in response.text
+        assert f"Selected Member Task {token}" in response.text
+        assert f"Other Member Task {token}" not in response.text
+        assert f"Hidden Member Task {token}" not in response.text
+        assert f"/tasks?scope=member&amp;member_id={teammate.id}&amp;view=up_next" in response.text
+        assert selected_task.assignee_id == teammate.id
+        assert hidden_response.status_code == 404
+    finally:
+        db.close()
 
 def test_tasks_next_up_uses_assignment_date_for_mine_scope():
     db = SessionLocal()
@@ -2184,6 +2304,11 @@ def test_admin_can_remove_user_and_cleanup_assigned_work():
             effort_level=EffortLevel.MEDIUM,
         )
 
+        teammate_email = teammate.email
+        teammate_id = teammate.id
+        task_id = task.id
+        admin_id = admin.id
+
         client = _authed_client(admin)
         response = client.post(
             f"/admin/settings/users/{teammate.id}/delete",
@@ -2193,15 +2318,15 @@ def test_admin_can_remove_user_and_cleanup_assigned_work():
         assert response.status_code == 302
 
         db.expire_all()
-        remaining_user = AuthService(db).get_by_email(teammate.email)
+        remaining_user = AuthService(db).get_by_email(teammate_email)
         assert remaining_user is None
 
-        updated_task = db.get(Task, task.id)
+        updated_task = db.get(Task, task_id)
         assert updated_task is not None
         assert updated_task.assignee_id is None
         assert updated_task.assignment_date is None
-        assert updated_task.created_by_id == admin.id
-        assert db.get(UserDailyCapacity, teammate.id) is None
+        assert updated_task.created_by_id == admin_id
+        assert db.get(UserDailyCapacity, teammate_id) is None
     finally:
         db.close()
 

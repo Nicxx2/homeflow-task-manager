@@ -344,7 +344,8 @@ def test_weekly_recurring_task_rolls_forward_with_single_active_task():
         token = uuid4().hex[:8]
         creator = _create_user(db, f"phase3-creator8-{token}@example.com", 10)
         assignee = _create_user(db, f"phase3-assignee8-{token}@example.com", 10)
-        first_due = date.today() + timedelta(days=7)
+        days_until_monday = (0 - date.today().weekday()) % 7 or 7
+        first_due = date.today() + timedelta(days=days_until_monday)
         blocked_due = first_due + timedelta(weeks=1)
         scheduling = SchedulingService(db)
         scheduling.add_away_period(
@@ -407,7 +408,8 @@ def test_weekly_recurring_task_skip_blocked_day_counts_skipped_occurrence_once()
         token = uuid4().hex[:8]
         creator = _create_user(db, f"phase3-creator8b-{token}@example.com", 10)
         assignee = _create_user(db, f"phase3-assignee8b-{token}@example.com", 10)
-        first_due = date.today() + timedelta(days=7)
+        days_until_monday = (0 - date.today().weekday()) % 7 or 7
+        first_due = date.today() + timedelta(days=days_until_monday)
         blocked_due = first_due + timedelta(weeks=1)
         scheduling = SchedulingService(db)
         scheduling.add_away_period(

@@ -15,8 +15,9 @@ from backend.app.db.session import get_db
 from backend.app.models.enums import EffortLevel, TaskStatus
 from backend.app.models.task import Task
 from backend.app.models.user import User
+from backend.app.models.user_daily_capacity_override import UserDailyCapacityOverride
 from backend.app.schemas.auth import RegisterRequest
-from backend.app.schemas.planner import PlannerMoveRequest
+from backend.app.schemas.planner import PlannerMoveRequest, PlannerTaskCreateRequest
 from backend.app.schemas.task import TaskAssignRequest, TaskCreate, TaskUpdate
 from backend.app.services.admin_settings_service import AdminSettingsService
 from backend.app.services.ai_service import AIService
@@ -645,6 +646,267 @@ def _task_matches_scope(*, task: Task, user: User, scope: str) -> bool:
     return True
 
 
+def _selected_member_scope(
+    *,
+    db: Session,
+    scope: str,
+    member_id: int | None,
+    missing_detail: str,
+    not_found_detail: str,
+) -> tuple[str, User | None, int | None, list[User]]:
+    visible_members = _member_users(db)
+    if scope == "member" or member_id is not None:
+        if member_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing_detail)
+        selected_member = next((member for member in visible_members if member.id == member_id), None)
+        if selected_member is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
+        return "member", selected_member, selected_member.id, visible_members
+    if scope == "team":
+        return "team", None, None, visible_members
+    return "mine", None, None, visible_members
+
+
+def _task_matches_selected_scope(*, task: Task, user: User, scope: str, selected_member_id: int | None) -> bool:
+    if scope == "member":
+        return selected_member_id is not None and task.assignee_id == selected_member_id
+    return _task_matches_scope(task=task, user=user, scope=scope)
+
+
+def _planner_task_recurrence_values(payload: PlannerTaskCreateRequest, due_date: date) -> dict:
+    if not payload.repeat_weekly:
+        return {
+            "recurrence_pattern": None,
+            "recurrence_interval_weeks": None,
+            "recurrence_until": None,
+            "recurrence_count_limit": None,
+            "recurrence_blocked_behavior": None,
+            "recurrence_late_behavior": None,
+            "recurrence_anchor_date": None,
+            "recurrence_occurrence_index": None,
+        }
+    return {
+        "recurrence_pattern": "weekly",
+        "recurrence_interval_weeks": payload.recurrence_interval_weeks or 1,
+        "recurrence_until": payload.recurrence_until,
+        "recurrence_count_limit": payload.recurrence_count_limit,
+        "recurrence_blocked_behavior": payload.recurrence_blocked_behavior or "skip",
+        "recurrence_late_behavior": payload.recurrence_late_behavior or "keep_schedule",
+        "recurrence_anchor_date": due_date,
+        "recurrence_occurrence_index": 0,
+    }
+
+
+def _planner_task_recurrence_summary(payload: PlannerTaskCreateRequest) -> str | None:
+    if not payload.repeat_weekly:
+        return None
+    interval = payload.recurrence_interval_weeks or 1
+    if interval == 1:
+        summary = "Repeats weekly"
+    else:
+        summary = f"Repeats every {interval} weeks"
+    details = [summary]
+    if payload.recurrence_count_limit:
+        details.append(f"{payload.recurrence_count_limit} total occurrence{'s' if payload.recurrence_count_limit != 1 else ''}")
+    if payload.recurrence_until:
+        details.append(f"ends {payload.recurrence_until.strftime('%d %b %Y')}")
+    if payload.recurrence_late_behavior == "from_completion":
+        details.append("late completions repeat from completion date")
+    else:
+        details.append("keeps original schedule")
+    return " - ".join(details)
+
+def _planner_task_create_preview(*, payload: PlannerTaskCreateRequest, user: User, db: Session) -> dict:
+    today = date.today()
+    errors: list[str] = []
+    warnings: list[str] = []
+    members: list[dict] = []
+    assignee = None
+    feedback = None
+    task_points = TaskService(db).get_points_for_level(payload.effort_level)
+    due_date = payload.assignment_date
+    recurrence_summary = _planner_task_recurrence_summary(payload)
+
+    if payload.repeat_weekly and payload.recurrence_count_limit == 1:
+        warnings.append("This recurring series will end after the first occurrence.")
+    if payload.assignment_date < today:
+        errors.append("New Planner tasks cannot be assigned to a past date.")
+    if not user.is_active:
+        errors.append("Your account cannot create Planner tasks.")
+
+    if payload.assignee_id is not None:
+        visible_members = _member_users(db)
+        assignee = next((member for member in visible_members if member.id == payload.assignee_id), None)
+        if assignee is None:
+            errors.append("Choose an active visible member.")
+        else:
+            feedback = WorkloadService(db).validate_assignment(
+                user_id=assignee.id,
+                date_value=payload.assignment_date,
+                task_points=task_points,
+            )
+            members.append(
+                {
+                    "user_id": assignee.id,
+                    "name": assignee.full_name,
+                    "current_points": feedback["current_points"],
+                    "selected_points": task_points,
+                    "projected_points": feedback["projected_points"],
+                    "capacity": feedback["capacity"],
+                    "remaining": None
+                    if feedback["capacity"] is None
+                    else feedback["capacity"] - feedback["projected_points"],
+                }
+            )
+
+    can_add_extra_capacity = False
+    extra_capacity_required = 0
+    if feedback is not None and not feedback["valid"]:
+        capacity = feedback.get("capacity")
+        projected = int(feedback.get("projected_points") or 0)
+        can_add_extra_capacity = bool(
+            assignee is not None
+            and assignee.id == user.id
+            and capacity is not None
+            and projected > int(capacity)
+            and not feedback.get("is_past_date")
+            and not feedback.get("blocked_by_policy")
+        )
+        if can_add_extra_capacity:
+            extra_capacity_required = projected - int(capacity)
+            warnings.append(feedback["message"])
+        else:
+            errors.append(feedback["message"])
+
+    ok = not errors and (feedback is None or feedback["valid"])
+    if ok and assignee is not None:
+        message = f"Create this task for {assignee.full_name} on {payload.assignment_date.strftime('%A, %d %B')}?"
+    elif ok:
+        message = f"Create this unassigned task due {due_date.strftime('%A, %d %B')}?"
+    elif can_add_extra_capacity:
+        message = (
+            f"This day is full by {extra_capacity_required} point"
+            f"{'s' if extra_capacity_required != 1 else ''}. Add extra capacity and create it?"
+        )
+    else:
+        message = "This task cannot be created on the selected day."
+
+    return {
+        "ok": ok,
+        "message": message,
+        "title": payload.title,
+        "assignment_date": payload.assignment_date.isoformat(),
+        "due_date": due_date.isoformat(),
+        "effort_level": payload.effort_level.value,
+        "task_points": task_points,
+        "repeat_weekly": payload.repeat_weekly,
+        "recurrence_summary": recurrence_summary,
+        "recurrence_interval_weeks": payload.recurrence_interval_weeks,
+        "recurrence_until": payload.recurrence_until.isoformat() if payload.recurrence_until else None,
+        "recurrence_count_limit": payload.recurrence_count_limit,
+        "recurrence_blocked_behavior": payload.recurrence_blocked_behavior,
+        "recurrence_late_behavior": payload.recurrence_late_behavior,
+        "assignee_id": assignee.id if assignee else None,
+        "assignee_name": assignee.full_name if assignee else None,
+        "members": members,
+        "warnings": list(dict.fromkeys(warnings)),
+        "errors": list(dict.fromkeys(errors)),
+        "can_add_extra_capacity": can_add_extra_capacity,
+        "extra_capacity_required": extra_capacity_required,
+    }
+
+
+def _add_planner_create_extra_capacity_without_commit(
+    *,
+    db: Session,
+    user_id: int,
+    date_value: date,
+    extra_points: int,
+) -> None:
+    if extra_points <= 0:
+        raise ValueError("Extra capacity must be positive.")
+    override = db.get(UserDailyCapacityOverride, {"user_id": user_id, "override_date": date_value})
+    if override:
+        override.extra_capacity_points += extra_points
+        db.add(override)
+        return
+    db.add(
+        UserDailyCapacityOverride(
+            user_id=user_id,
+            override_date=date_value,
+            extra_capacity_points=extra_points,
+        )
+    )
+
+
+def _commit_planner_task_create(*, payload: PlannerTaskCreateRequest, user: User, db: Session) -> dict:
+    preview = _planner_task_create_preview(payload=payload, user=user, db=db)
+    extra_capacity_added = 0
+    if not preview["ok"]:
+        if payload.add_extra_capacity and preview.get("can_add_extra_capacity"):
+            extra_capacity_added = int(preview.get("extra_capacity_required") or 0)
+            _add_planner_create_extra_capacity_without_commit(
+                db=db,
+                user_id=user.id,
+                date_value=payload.assignment_date,
+                extra_points=extra_capacity_added,
+            )
+            db.flush()
+            preview = _planner_task_create_preview(payload=payload, user=user, db=db)
+            if not preview["ok"]:
+                db.rollback()
+                return preview
+        else:
+            return preview
+
+    due_date = payload.assignment_date
+    task_points = TaskService(db).get_points_for_level(payload.effort_level)
+    recurrence_values = _planner_task_recurrence_values(payload, due_date)
+    task = Task(
+        title=payload.title.strip(),
+        description=payload.description.strip(),
+        due_date=due_date,
+        assignee_id=payload.assignee_id,
+        assignment_date=payload.assignment_date if payload.assignee_id is not None else None,
+        created_by_id=user.id,
+        effort_level=payload.effort_level,
+        points_value=task_points,
+        fallback_used=False,
+        recurrence_pattern=recurrence_values["recurrence_pattern"],
+        recurrence_interval_weeks=recurrence_values["recurrence_interval_weeks"],
+        recurrence_until=recurrence_values["recurrence_until"],
+        recurrence_count_limit=recurrence_values["recurrence_count_limit"],
+        recurrence_blocked_behavior=recurrence_values["recurrence_blocked_behavior"],
+        recurrence_late_behavior=recurrence_values["recurrence_late_behavior"],
+        recurrence_parent_id=None,
+        recurrence_anchor_date=recurrence_values["recurrence_anchor_date"],
+        recurrence_occurrence_index=recurrence_values["recurrence_occurrence_index"],
+    )
+    db.add(task)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(task)
+
+    message = "Task created."
+    if extra_capacity_added:
+        message = (
+            f"Task created. Added {extra_capacity_added} extra capacity point"
+            f"{'s' if extra_capacity_added != 1 else ''}."
+        )
+    return {
+        **preview,
+        "ok": True,
+        "created": True,
+        "task_id": task.id,
+        "task_url": f"/tasks/{task.id}",
+        "extra_capacity_added": extra_capacity_added,
+        "message": message,
+    }
+
+
 def _parse_recurrence_form(
     *,
     repeat_weekly: str,
@@ -932,6 +1194,7 @@ def tasks_page(
     request: Request,
     scope: str = "mine",
     view: str = "up_next",
+    member_id: int | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -949,12 +1212,35 @@ def tasks_page(
     assignable_users_by_task = _assignable_users_by_task(db, tasks + completed_history)
     today = date.today()
     tomorrow = today + timedelta(days=1)
-    selected_scope = "mine" if scope == "mine" else "team"
-    scoped_tasks = [task for task in tasks if _task_matches_scope(task=task, user=user, scope=selected_scope)]
+    selected_scope, selected_member, selected_member_id, visible_members = _selected_member_scope(
+        db=db,
+        scope=scope,
+        member_id=member_id,
+        missing_detail="Choose a task list member.",
+        not_found_detail="Task list member not found.",
+    )
+    filter_query = f"scope={selected_scope}"
+    if selected_member_id is not None:
+        filter_query = f"{filter_query}&member_id={selected_member_id}"
+    scoped_tasks = [
+        task
+        for task in tasks
+        if _task_matches_selected_scope(
+            task=task,
+            user=user,
+            scope=selected_scope,
+            selected_member_id=selected_member_id,
+        )
+    ]
     scoped_completed_history = [
         task
         for task in completed_history
-        if _task_matches_scope(task=task, user=user, scope=selected_scope)
+        if _task_matches_selected_scope(
+            task=task,
+            user=user,
+            scope=selected_scope,
+            selected_member_id=selected_member_id,
+        )
     ]
     overdue_tasks = _sort_tasks_by_planned_date(
         [
@@ -1060,6 +1346,10 @@ def tasks_page(
             "today": today,
             "tomorrow": tomorrow,
             "scope": selected_scope,
+            "selected_member": selected_member,
+            "selected_member_id": selected_member_id,
+            "visible_members": visible_members,
+            "filter_query": filter_query,
             "selected_view": selected_view,
             "selected_bucket": available_views[selected_view],
             "task_views": [
@@ -2196,6 +2486,7 @@ def planner_page(
     filter_query = f"scope={selected_scope}"
     if selected_member_id is not None:
         filter_query = f"{filter_query}&member_id={selected_member_id}"
+    planner_default_assignee_id = user.id if selected_scope == "mine" else selected_member_id
 
     today = date.today()
     period = _planner_period(view=view, anchor=anchor, today=today)
@@ -2227,6 +2518,8 @@ def planner_page(
             "selected_member": selected_member,
             "selected_member_id": selected_member_id,
             "filter_query": filter_query,
+            "planner_default_assignee_id": planner_default_assignee_id,
+            "levels": [EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH],
             "current_page_return_to": _encoded_redirect_target(_current_path_with_query(request, "/planner")),
             "scope": selected_scope,
             "today": today,
@@ -2266,6 +2559,28 @@ def planner_move_commit(
     if result.get("conflict"):
         return JSONResponse(result, status_code=status.HTTP_409_CONFLICT)
     return JSONResponse(result, status_code=status.HTTP_200_OK if result["ok"] else status.HTTP_400_BAD_REQUEST)
+
+
+@router.post("/planner/tasks/preview")
+def planner_task_create_preview(
+    payload: PlannerTaskCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = _planner_task_create_preview(payload=payload, user=user, db=db)
+    status_code = status.HTTP_200_OK if result["ok"] or result.get("can_add_extra_capacity") else status.HTTP_400_BAD_REQUEST
+    return JSONResponse(result, status_code=status_code)
+
+
+@router.post("/planner/tasks/create")
+def planner_task_create_commit(
+    payload: PlannerTaskCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = _commit_planner_task_create(payload=payload, user=user, db=db)
+    status_code = status.HTTP_200_OK if result["ok"] else status.HTTP_400_BAD_REQUEST
+    return JSONResponse(result, status_code=status_code)
 
 
 @router.get("/schedule", response_class=HTMLResponse)
@@ -2445,6 +2760,7 @@ def day_view(
     request: Request,
     day: str | None = None,
     scope: str = "team",
+    member_id: int | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -2457,14 +2773,26 @@ def day_view(
     else:
         target_day = date.today()
 
-    selected_scope = "mine" if scope == "mine" else "team"
-    users = _member_users(db)
+    selected_scope, selected_member, selected_member_id, visible_members = _selected_member_scope(
+        db=db,
+        scope=scope,
+        member_id=member_id,
+        missing_detail="Choose a day view member.",
+        not_found_detail="Day view member not found.",
+    )
+    if selected_scope == "member" and selected_member is not None:
+        users = [selected_member]
+    elif selected_scope == "mine":
+        users = [user]
+    else:
+        users = visible_members
+    filter_query = f"scope={selected_scope}"
+    if selected_member_id is not None:
+        filter_query = f"{filter_query}&member_id={selected_member_id}"
     workload = WorkloadService(db)
     rows = []
     effort_configs = {config.level.value: config.points_value for config in AdminSettingsService(db).get_effort_configs()}
     for member in users:
-        if selected_scope == "mine" and member.id != user.id:
-            continue
         points = workload.get_daily_points(user_id=member.id, date_value=target_day)
         capacity_breakdown = workload.get_capacity_breakdown(user_id=member.id, date_value=target_day)
         cap = capacity_breakdown["total_capacity"]
@@ -2504,6 +2832,10 @@ def day_view(
             "target_day": target_day,
             "rows": rows,
             "scope": selected_scope,
+            "selected_member": selected_member,
+            "selected_member_id": selected_member_id,
+            "visible_members": visible_members,
+            "filter_query": filter_query,
             "statuses": [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED],
             "current_page_url": _current_path_with_query(request, "/day-view"),
             "effort_shortcuts": effort_configs,

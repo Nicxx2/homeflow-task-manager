@@ -99,8 +99,14 @@ def test_create_unassigned_task_with_points_from_config():
 
 
 def test_ai_service_simulation_returns_required_shape():
-    result = AIService().classify_task("Quick cleanup", "Wipe kitchen counters and floor.")
-    assert result["suggested_level"] in {EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH}
-    assert isinstance(result["confidence"], float)
-    assert isinstance(result["reason"], str)
-    assert result["simulated"] is True
+    db = SessionLocal()
+    try:
+        result = AIService(db).classify_task("Quick cleanup", "Wipe kitchen counters and floor.")
+        assert result["suggested_level"] in {EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH}
+        assert isinstance(result["confidence"], float)
+        assert isinstance(result["reason"], str)
+        assert result["provider_used"]
+        assert result["model_used"]
+        assert isinstance(result["fallback_used"], bool)
+    finally:
+        db.close()

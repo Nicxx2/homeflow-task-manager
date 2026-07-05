@@ -76,7 +76,9 @@
     [data-planner-root].planner-has-selection { padding-bottom: 20rem; }
     [data-planner-selection-bar] { max-height: min(17rem, calc(100vh - 2rem)); overflow-y: auto; }
     body.planner-selection-active #assistant-toggle,
-    body.planner-selection-active #assistant-panel { display: none !important; }
+    body.planner-selection-active #assistant-panel,
+    body.planner-create-active #assistant-toggle,
+    body.planner-create-active #assistant-panel { display: none !important; }
   }
 </style>
 
@@ -86,6 +88,7 @@
   data-scope="{{ scope }}"
   data-filter-query="{{ filter_query }}"
   {% if selected_member_id %}data-selected-member-id="{{ selected_member_id }}"{% endif %}
+  data-default-assignee-id="{{ planner_default_assignee_id or '' }}"
   class="pb-24"
 >
   <header class="density-header mb-5">
@@ -132,7 +135,7 @@
             class="app-select max-w-44 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
             onchange="if (this.value) this.form.submit();"
           >
-            <option value="">Member</option>
+            <option value="" disabled {% if not selected_member_id %}selected{% endif %}>Choose member</option>
             {% for member in visible_members %}
             <option value="{{ member.id }}" {% if selected_member_id == member.id %}selected{% endif %}>{{ member.full_name }}</option>
             {% endfor %}
@@ -172,9 +175,14 @@
             <p class="text-xs uppercase text-slate-500 dark:text-slate-400">{{ day.date.strftime('%a') }}</p>
             <p class="font-semibold {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }} {{ day.date.strftime('%b') }}</p>
           </div>
-          <span class="text-[10px] text-slate-500 dark:text-slate-400">
-            {% if day.capacity is none %}{{ day.points }} pts{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}
-          </span>
+          <div class="flex shrink-0 items-center gap-1">
+            {% if not day.is_past %}
+            <button type="button" data-planner-create-open data-create-date="{{ day.date.isoformat() }}" class="rounded-md border border-slate-300 px-2 py-1 text-[10px] hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" aria-label="Create task on {{ day.date.strftime('%A %d %B') }}">+ Task</button>
+            {% endif %}
+            <span class="text-[10px] text-slate-500 dark:text-slate-400">
+              {% if day.capacity is none %}{{ day.points }} pts{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}
+            </span>
+          </div>
         </div>
         {% if scope == "team" %}
         <div class="mt-2 space-y-0.5 text-[10px] text-slate-500 dark:text-slate-400">
@@ -209,7 +217,12 @@
     >
       <div class="flex items-center justify-between gap-1">
         <span class="text-xs font-semibold {% if day.is_today %}app-user-accent{% endif %}">{{ day.date.day }}</span>
-        <span class="text-[9px] text-slate-500 dark:text-slate-400">{% if day.capacity is none %}{{ day.points }}{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}</span>
+        <div class="flex items-center gap-1">
+          {% if not day.is_past %}
+          <button type="button" data-planner-create-open data-create-date="{{ day.date.isoformat() }}" class="rounded border border-slate-300 px-1.5 py-0.5 text-[9px] hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" aria-label="Create task on {{ day.date.strftime('%A %d %B') }}">+</button>
+          {% endif %}
+          <span class="text-[9px] text-slate-500 dark:text-slate-400">{% if day.capacity is none %}{{ day.points }}{% else %}{{ day.points }}/{{ day.capacity }}{% endif %}</span>
+        </div>
       </div>
       <p class="mt-2 text-[9px] text-slate-500 dark:text-slate-400 sm:hidden">{{ day.tasks|length }} task{{ "" if day.tasks|length == 1 else "s" }}</p>
       <div class="mt-1 space-y-1">
@@ -293,6 +306,45 @@
   </section>
 </div>
 
+
+<div data-planner-create-modal class="fixed inset-0 z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="planner-create-title">
+  <button type="button" data-planner-create-close class="absolute inset-0 bg-slate-950/60" aria-label="Close quick task"></button>
+  <section class="app-surface relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border p-5 shadow-2xl">
+    <div class="flex items-start justify-between gap-3">
+      <div><h2 id="planner-create-title" class="text-lg font-semibold">Quick task</h2><p data-planner-create-message class="mt-1 text-sm text-slate-500 dark:text-slate-400">Create from the selected day.</p></div>
+      <button type="button" data-planner-create-close class="rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700">Close</button>
+    </div>
+    <form data-planner-create-form class="mt-4 space-y-3">
+      <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Title</span><input name="title" maxlength="255" class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required /></label>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Date</span><input type="date" name="assignment_date" min="{{ today.isoformat() }}" class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required /></label>
+        <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Effort</span><select name="effort_level" class="app-select w-full rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800" required><option value="" disabled selected>Choose effort</option>{% for level in levels %}<option value="{{ level.value }}">{{ level.value|capitalize }}</option>{% endfor %}</select></label>
+      </div>
+      <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Assign to</span><select name="assignee_id" class="app-select w-full rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800"><option value="">Unassigned</option>{% for member in visible_members %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}</select></label>
+      <details class="rounded-md border border-slate-200 p-3 dark:border-slate-700">
+        <summary class="cursor-pointer list-none text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Repeats (optional)</summary>
+        <div class="mt-3 space-y-3">
+          <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" name="repeat_weekly" value="true" />Repeat weekly</label>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Every X weeks</span><input type="number" min="1" name="recurrence_interval_weeks" value="1" data-planner-recurrence-field class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" /></label>
+            <label class="block text-sm sm:col-span-2"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">End date (optional)</span><input type="date" name="recurrence_until" data-planner-recurrence-field class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" /></label>
+          </div>
+          <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Total occurrences (optional)</span><input type="number" min="1" name="recurrence_count_limit" data-planner-recurrence-field class="app-input w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" /></label>
+          <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Blocked day</span><select name="recurrence_blocked_behavior" data-planner-recurrence-field class="app-select w-full rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800"><option value="skip">Skip that occurrence</option><option value="move_same_week">Move within same week</option></select></label>
+          <label class="block text-sm"><span class="mb-1 block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">If completed late</span><select name="recurrence_late_behavior" data-planner-recurrence-field class="app-select w-full rounded-md border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800"><option value="keep_schedule">Keep original schedule</option><option value="from_completion">Repeat from completion date</option></select></label>
+        </div>
+      </details>
+      <details class="rounded-md border border-slate-200 p-3 dark:border-slate-700">
+        <summary class="cursor-pointer list-none text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Description (optional)</summary>
+        <textarea name="description" rows="2" maxlength="5000" class="app-input mt-3 w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"></textarea>
+      </details>
+      <a href="/tasks/new" class="app-link text-xs hover:underline">Open full form</a>
+      <button type="submit" data-planner-create-review class="app-primary-button w-full rounded-md px-4 py-2 text-sm">Review</button>
+    </form>
+    <div data-planner-create-summary class="mt-4 space-y-2"></div><div data-planner-create-warnings class="mt-3 space-y-1 text-xs text-amber-700 dark:text-amber-300"></div><div data-planner-create-errors class="mt-3 space-y-1 text-xs text-red-700 dark:text-red-300"></div>
+    <div class="mt-5 flex flex-wrap justify-end gap-2"><button type="button" data-planner-create-cancel class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">Cancel</button><button type="button" data-planner-create-extra class="hidden rounded-md border border-amber-300 px-4 py-2 text-sm text-amber-800 dark:border-amber-700 dark:text-amber-200" disabled>Add extra capacity</button><button type="button" data-planner-create-confirm class="app-primary-button rounded-md px-4 py-2 text-sm" disabled>Create task</button></div>
+  </section>
+</div>
 <script>
 (function initPlanner() {
   const root = document.querySelector("[data-planner-root]");
@@ -303,6 +355,7 @@
   const selectedCount = root.querySelector("[data-planner-selected-count]");
   const live = root.querySelector("[data-planner-live]");
   const modal = document.querySelector("[data-planner-modal]");
+  const createModal = document.querySelector("[data-planner-create-modal]");
   const titleTooltip = root.querySelector("[data-planner-title-tooltip]");
   const modalMessage = modal.querySelector("[data-planner-modal-message]");
   const modalSummary = modal.querySelector("[data-planner-modal-summary]");
@@ -310,8 +363,18 @@
   const modalErrors = modal.querySelector("[data-planner-modal-errors]");
   const confirmButton = modal.querySelector("[data-planner-confirm]");
   const confirmExtraButton = modal.querySelector("[data-planner-confirm-extra]");
+  const createForm = createModal.querySelector("[data-planner-create-form]");
+  const createMessage = createModal.querySelector("[data-planner-create-message]");
+  const createSummary = createModal.querySelector("[data-planner-create-summary]");
+  const createWarnings = createModal.querySelector("[data-planner-create-warnings]");
+  const createErrors = createModal.querySelector("[data-planner-create-errors]");
+  const createConfirmButton = createModal.querySelector("[data-planner-create-confirm]");
+  const createExtraButton = createModal.querySelector("[data-planner-create-extra]");
+  const createReviewButton = createModal.querySelector("[data-planner-create-review]");
   let preview = null;
+  let createPreview = null;
   let pending = false;
+  let createPending = false;
   let activeDropTarget = null;
 
   function taskCards() {
@@ -403,6 +466,16 @@
     }
     return response.json();
   }
+
+  function setCreateModalOpen(open) { createModal.classList.toggle("hidden", !open); createModal.classList.toggle("flex", open); document.body.classList.toggle("planner-create-active", open); if (!open) { createPreview = null; createForm.reset(); resetCreateReview("Create from the selected day."); } }
+  function syncCreateRecurrenceFields() { const repeat = createForm.elements.repeat_weekly; const enabled = Boolean(repeat && repeat.checked); createForm.querySelectorAll("[data-planner-recurrence-field]").forEach(function(field) { field.disabled = !enabled; }); }
+  function resetCreateReview(message) { createPreview = null; createSummary.replaceChildren(); createWarnings.replaceChildren(); createErrors.replaceChildren(); createConfirmButton.disabled = true; createExtraButton.disabled = true; createExtraButton.classList.add("hidden"); createExtraButton.textContent = "Add extra capacity"; if (message) createMessage.textContent = message; }
+  function openCreateModal(assignmentDate) { setCreateModalOpen(true); createForm.reset(); createForm.elements.assignment_date.value = assignmentDate; const defaultAssignee = root.dataset.defaultAssigneeId || ""; const assigneeSelect = createForm.elements.assignee_id; if (Array.from(assigneeSelect.options).some(function(option) { return option.value === defaultAssignee; })) assigneeSelect.value = defaultAssignee; syncCreateRecurrenceFields(); resetCreateReview("Create from " + assignmentDate + "."); createForm.elements.title.focus(); }
+  function createPayload(addExtraCapacity) { const data = new FormData(createForm); const assigneeValue = String(data.get("assignee_id") || ""); const assignmentDate = String(data.get("assignment_date") || ""); const repeatWeekly = Boolean(data.get("repeat_weekly")); const recurrenceUntil = String(data.get("recurrence_until") || ""); const recurrenceCount = String(data.get("recurrence_count_limit") || ""); const recurrenceInterval = String(data.get("recurrence_interval_weeks") || "1"); return { title: String(data.get("title") || "").trim(), description: String(data.get("description") || ""), due_date: assignmentDate, assignment_date: assignmentDate, effort_level: String(data.get("effort_level") || ""), assignee_id: assigneeValue ? Number(assigneeValue) : null, repeat_weekly: repeatWeekly, recurrence_interval_weeks: repeatWeekly ? Number(recurrenceInterval || "1") : 1, recurrence_until: repeatWeekly && recurrenceUntil ? recurrenceUntil : null, recurrence_count_limit: repeatWeekly && recurrenceCount ? Number(recurrenceCount) : null, recurrence_blocked_behavior: repeatWeekly ? String(data.get("recurrence_blocked_behavior") || "skip") : "skip", recurrence_late_behavior: repeatWeekly ? String(data.get("recurrence_late_behavior") || "keep_schedule") : "keep_schedule", add_extra_capacity: Boolean(addExtraCapacity) }; }
+  function normalizeErrors(payload) { if (Array.isArray(payload.errors) && payload.errors.length) return payload.errors; if (Array.isArray(payload.detail)) return payload.detail.map(function(item) { return item.msg || "Invalid task details."; }); if (payload.detail && typeof payload.detail === "string") return [payload.detail]; return []; }
+  function renderCreateReview(payload) { createMessage.textContent = payload.message || "Task review ready."; createSummary.replaceChildren(); createWarnings.replaceChildren(); createErrors.replaceChildren(); createConfirmButton.disabled = !payload.ok; createExtraButton.disabled = true; createExtraButton.classList.add("hidden"); createExtraButton.textContent = "Add extra capacity"; const titleRow = document.createElement("div"); titleRow.className = "flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"; const title = document.createElement("span"); title.className = "min-w-0 truncate"; title.textContent = payload.title || createPayload(false).title || "New task"; const points = document.createElement("span"); points.className = "shrink-0 text-xs text-slate-500 dark:text-slate-400"; points.textContent = (payload.task_points || "-") + " pts"; titleRow.append(title, points); createSummary.appendChild(titleRow); if (payload.repeat_weekly && payload.recurrence_summary) { const repeatRow = document.createElement("div"); repeatRow.className = "rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"; const repeatLabel = document.createElement("p"); repeatLabel.className = "text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400"; repeatLabel.textContent = "Repeats"; const repeatText = document.createElement("p"); repeatText.className = "mt-1"; repeatText.textContent = payload.recurrence_summary; repeatRow.append(repeatLabel, repeatText); createSummary.appendChild(repeatRow); } (payload.members || []).forEach(function(member) { const row = document.createElement("div"); row.className = "flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"; const name = document.createElement("span"); name.textContent = member.name; const capacity = document.createElement("span"); capacity.className = "text-xs text-slate-500 dark:text-slate-400"; if (member.capacity == null) capacity.textContent = member.projected_points + " pts - capacity unset"; else if (member.remaining < 0) capacity.textContent = member.projected_points + " / " + member.capacity + " pts - " + Math.abs(member.remaining) + " over"; else capacity.textContent = member.projected_points + " / " + member.capacity + " pts - " + member.remaining + " left"; row.append(name, capacity); createSummary.appendChild(row); }); (payload.warnings || []).forEach(function(item) { addMessage(createWarnings, item); }); if (payload.can_add_extra_capacity && payload.extra_capacity_required > 0) { addMessage(createWarnings, "Adds " + payload.extra_capacity_required + " extra capacity point" + (payload.extra_capacity_required === 1 ? "" : "s") + " to this day."); createExtraButton.textContent = "Add " + payload.extra_capacity_required + " extra pts"; createExtraButton.classList.remove("hidden"); createExtraButton.disabled = false; } normalizeErrors(payload).forEach(function(item) { addMessage(createErrors, item); }); }
+  async function reviewCreate() { if (createPending) return; createPending = true; resetCreateReview("Checking task..."); createReviewButton.disabled = true; try { const response = await fetch("/planner/tasks/preview", { method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(createPayload(false)) }); const payload = await readJson(response); createPreview = payload; renderCreateReview(payload); } catch (error) { createMessage.textContent = "The task could not be checked."; addMessage(createErrors, error.message || "Check your connection and try again."); } finally { createPending = false; createReviewButton.disabled = false; } }
+  async function confirmCreate(addExtraCapacity) { const canAddExtraCapacity = Boolean(addExtraCapacity && createPreview && createPreview.can_add_extra_capacity); if (createPending || (!createPreview || (!createPreview.ok && !canAddExtraCapacity))) return; createPending = true; createConfirmButton.disabled = true; createExtraButton.disabled = true; const activeButton = canAddExtraCapacity ? createExtraButton : createConfirmButton; activeButton.textContent = canAddExtraCapacity ? "Adding..." : "Creating..."; try { const response = await fetch("/planner/tasks/create", { method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(createPayload(canAddExtraCapacity)) }); const payload = await readJson(response); if (!response.ok || !payload.ok) { createPreview = payload; renderCreateReview(payload); return; } createMessage.textContent = payload.message || "Task created."; window.location.reload(); } catch (error) { createMessage.textContent = "The task could not be created."; createErrors.replaceChildren(); addMessage(createErrors, error.message || "Check your connection and try again."); } finally { createPending = false; createConfirmButton.textContent = "Create task"; if (createPreview && createPreview.can_add_extra_capacity && createPreview.extra_capacity_required > 0) { createExtraButton.textContent = "Add " + createPreview.extra_capacity_required + " extra pts"; createExtraButton.disabled = false; } else createExtraButton.textContent = "Add extra capacity"; if (createPreview && createPreview.ok) createConfirmButton.disabled = false; } }
 
   async function reviewMove(assignmentDate) {
     if (!selected.size || pending) return;
@@ -640,7 +713,7 @@
       reviewMove(target.dataset.plannerDropDate);
     });
     target.addEventListener("click", function(event) {
-      if (event.target.closest("[data-planner-task]")) return;
+      if (event.target.closest("[data-planner-task], [data-planner-create-open]")) return;
       if (target.matches("[data-planner-mobile-day]")) {
         root.querySelectorAll("[data-planner-mobile-day]").forEach(function(button) {
           button.classList.toggle("app-tab-active", button === target);
@@ -676,6 +749,14 @@
     });
   });
 
+  root.querySelectorAll("[data-planner-create-open]").forEach(function(button) { button.addEventListener("click", function(event) { event.preventDefault(); event.stopPropagation(); openCreateModal(button.dataset.createDate); }); });
+  createForm.addEventListener("submit", function(event) { event.preventDefault(); reviewCreate(); });
+  createForm.addEventListener("input", function(event) { if (event.target && event.target.name === "repeat_weekly") syncCreateRecurrenceFields(); resetCreateReview(); });
+  createModal.querySelectorAll("[data-planner-create-close], [data-planner-create-cancel]").forEach(function(button) { button.addEventListener("click", function() { setCreateModalOpen(false); }); });
+  createConfirmButton.addEventListener("click", function() { confirmCreate(false); });
+  createExtraButton.addEventListener("click", function() { confirmCreate(true); });
+  syncCreateRecurrenceFields();
+
   root.querySelector("[data-planner-clear]").addEventListener("click", clearSelection);
   root.querySelector("[data-planner-move-form]").addEventListener("submit", function(event) {
     event.preventDefault();
@@ -696,6 +777,7 @@
   document.addEventListener("keydown", function(event) {
     if (event.key === "Escape") hideTitleTooltip();
     if (event.key === "Escape" && !modal.classList.contains("hidden")) setModalOpen(false);
+    if (event.key === "Escape" && !createModal.classList.contains("hidden")) setCreateModalOpen(false);
   });
 })();
 </script>

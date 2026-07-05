@@ -1,36 +1,51 @@
 {% extends "base.html" %}
 {% block content %}
-<header class="density-header mb-6 flex items-center justify-between">
+<header class="density-header mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
   <div>
     <h1 class="text-2xl font-semibold">Day View</h1>
     <p class="text-slate-500 dark:text-slate-400">
       {% if scope == "team" %}
         Team workload and capacity for the selected day.
+      {% elif scope == "member" and selected_member %}
+        Workload and capacity for {{ selected_member.full_name }}.
       {% else %}
         Your workload and capacity for the selected day.
       {% endif %}
     </p>
   </div>
-  <form method="get" action="/day-view" class="flex items-center gap-2">
+  <form method="get" action="/day-view" class="flex flex-wrap items-center gap-2">
     <input type="date" name="day" value="{{ target_day }}" class="rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800" />
     <input type="hidden" name="scope" value="{{ scope }}" />
+    {% if selected_member_id %}<input type="hidden" name="member_id" value="{{ selected_member_id }}" />{% endif %}
     <button class="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">Go</button>
   </form>
 </header>
 
-<section class="mb-4 flex items-center gap-2">
-  <a
-    href="/day-view?day={{ target_day }}&scope=team"
-    class="rounded-md px-3 py-2 text-sm {% if scope == 'team' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
-  >
-    Everyone
-  </a>
+<section class="mb-4 flex flex-wrap items-center gap-2">
   <a
     href="/day-view?day={{ target_day }}&scope=mine"
     class="rounded-md px-3 py-2 text-sm {% if scope == 'mine' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
-  >
-    Just mine
-  </a>
+  >Mine</a>
+  <a
+    href="/day-view?day={{ target_day }}&scope=team"
+    class="rounded-md px-3 py-2 text-sm {% if scope == 'team' %}app-tab-active{% else %}border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800{% endif %}"
+  >Everyone</a>
+  <form method="get" action="/day-view" class="flex items-center gap-2">
+    <input type="hidden" name="day" value="{{ target_day }}" />
+    <input type="hidden" name="scope" value="member" />
+    <label for="day-view-member-filter" class="sr-only">Day view member</label>
+    <select
+      id="day-view-member-filter"
+      name="member_id"
+      class="app-select max-w-44 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+      onchange="if (this.value) this.form.submit();"
+    >
+      <option value="" disabled {% if not selected_member_id %}selected{% endif %}>Choose member</option>
+      {% for member in visible_members %}
+      <option value="{{ member.id }}" {% if selected_member_id == member.id %}selected{% endif %}>{{ member.full_name }}</option>
+      {% endfor %}
+    </select>
+  </form>
 </section>
 
 <section class="density-stack space-y-4">

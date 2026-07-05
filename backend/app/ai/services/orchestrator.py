@@ -101,6 +101,43 @@ class AIOrchestratorService:
                 )
                 raise
 
+    def parse_assistant_intent(self, *, message: str, visible_members: list[str], today: str) -> dict | None:
+        current = self.db.get(AISettings, 1)
+        if not current or not current.ai_enabled or current.active_provider == "rules":
+            return None
+
+        prompt = (
+            "You classify a Homeflow task assistant request. Return JSON only.\n"
+            "Allowed intents: list_tasks, capacity, unsupported_action, help.\n"
+            "Allowed task filters: effort low|medium|high|null, status active|pending|in_progress|completed|null, "
+            "date YYYY-MM-DD|null, date_field due|assignment|either, assignee me|unassigned|one visible member name|null.\n"
+            "Do not invent member names or dates. If the user asks to create, delete, edit, or move tasks, "
+            "use unsupported_action because app-owned confirmation flows must handle writes.\n"
+            "Schema: {\"intent\":\"list_tasks\",\"effort\":null,\"status\":\"active\",\"date\":null,"
+            "\"date_field\":\"either\",\"assignee\":null,\"capacity_effort\":null,\"confidence\":0.0}\n"
+            f"Today: {today}\n"
+            f"Visible members: {', '.join(visible_members[:30])}\n"
+            f"Message: {message[:500]}"
+        )
+
+        try:
+            provider = self.registry.get(current.active_provider)
+            return provider.generate_json(
+                prompt=prompt,
+                model=current.active_model,
+                timeout_seconds=max(2, min(current.timeout_seconds, 8)),
+                max_tokens=220,
+            )
+        except Exception as exc:
+            self._record_error(
+                provider_name=current.active_provider,
+                model_identifier=current.active_model,
+                error_type=type(exc).__name__,
+                message=str(exc),
+                context="assistant-intent",
+            )
+            return None
+
     def _classify_with_provider(
         self,
         *,

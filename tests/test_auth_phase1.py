@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -50,36 +51,39 @@ def setup_module():
 
 
 def test_register_and_login_api():
+    token = uuid4().hex[:8]
+    user_email = f"user1-{token}@example.com"
+    admin_email = f"approval-admin-{token}@example.com"
     client = TestClient(app)
 
     register = client.post(
         "/api/v1/auth/register",
-        json={"email": "user1@example.com", "full_name": "User One", "password": "securepass123"},
+        json={"email": user_email, "full_name": "User One", "password": "securepass123"},
     )
     assert register.status_code == 201
-    assert register.json()["email"] == "user1@example.com"
+    assert register.json()["email"] == user_email
     assert register.json()["approval_status"] == "pending"
 
-    login = client.post("/api/v1/auth/login", json={"email": "user1@example.com", "password": "securepass123"})
+    login = client.post("/api/v1/auth/login", json={"email": user_email, "password": "securepass123"})
     assert login.status_code == 403
     assert login.json()["detail"] == "Your account is pending admin approval."
 
     db = SessionLocal()
     try:
         admin = AuthService(db).register(
-            RegisterRequest(email="approval-admin@example.com", full_name="Approval Admin", password="securepass123"),
+            RegisterRequest(email=admin_email, full_name="Approval Admin", password="securepass123"),
             is_admin=True,
             require_approval=False,
             show_in_member_lists=False,
         )
         assert admin.is_admin is True
 
-        pending_user = AuthService(db).get_by_email("user1@example.com")
+        pending_user = AuthService(db).get_by_email(user_email)
         AdminSettingsService(db).approve_user(pending_user.id)
     finally:
         db.close()
 
-    approved_login = client.post("/api/v1/auth/login", json={"email": "user1@example.com", "password": "securepass123"})
+    approved_login = client.post("/api/v1/auth/login", json={"email": user_email, "password": "securepass123"})
     assert approved_login.status_code == 200
     payload = approved_login.json()
     assert payload["access_token"]
@@ -111,6 +115,7 @@ def test_rejecting_pending_user_deletes_the_account():
 
 
 def test_register_auto_approves_when_setting_is_enabled():
+    email = f"auto-approved-{uuid4().hex[:8]}@example.com"
     client = TestClient(app)
     db = SessionLocal()
     try:
@@ -125,14 +130,14 @@ def test_register_auto_approves_when_setting_is_enabled():
 
     register = client.post(
         "/api/v1/auth/register",
-        json={"email": "auto-approved@example.com", "full_name": "Auto Approved", "password": "securepass123"},
+        json={"email": email, "full_name": "Auto Approved", "password": "securepass123"},
     )
     assert register.status_code == 201
     assert register.json()["approval_status"] == "approved"
 
     login = client.post(
         "/api/v1/auth/login",
-        json={"email": "auto-approved@example.com", "password": "securepass123"},
+        json={"email": email, "password": "securepass123"},
     )
     assert login.status_code == 200
 
@@ -149,6 +154,7 @@ def test_register_auto_approves_when_setting_is_enabled():
 
 
 def test_register_applies_default_capacity_setting():
+    email = f"capacity-user-{uuid4().hex[:8]}@example.com"
     client = TestClient(app)
     db = SessionLocal()
     try:
@@ -163,14 +169,14 @@ def test_register_applies_default_capacity_setting():
 
     register = client.post(
         "/api/v1/auth/register",
-        json={"email": "capacity-user@example.com", "full_name": "Capacity User", "password": "securepass123"},
+        json={"email": email, "full_name": "Capacity User", "password": "securepass123"},
     )
     assert register.status_code == 201
     assert register.json()["approval_status"] == "approved"
 
     db = SessionLocal()
     try:
-        user = AuthService(db).get_by_email("capacity-user@example.com")
+        user = AuthService(db).get_by_email(email)
         capacity = db.get(UserDailyCapacity, user.id)
         assert capacity is not None
         assert capacity.daily_capacity_points == 6
@@ -185,6 +191,7 @@ def test_register_applies_default_capacity_setting():
 
 
 def test_pending_registration_keeps_default_capacity_setting():
+    email = f"pending-capacity-user-{uuid4().hex[:8]}@example.com"
     client = TestClient(app)
     db = SessionLocal()
     try:
@@ -199,14 +206,14 @@ def test_pending_registration_keeps_default_capacity_setting():
 
     register = client.post(
         "/api/v1/auth/register",
-        json={"email": "pending-capacity-user@example.com", "full_name": "Pending Capacity", "password": "securepass123"},
+        json={"email": email, "full_name": "Pending Capacity", "password": "securepass123"},
     )
     assert register.status_code == 201
     assert register.json()["approval_status"] == "pending"
 
     db = SessionLocal()
     try:
-        user = AuthService(db).get_by_email("pending-capacity-user@example.com")
+        user = AuthService(db).get_by_email(email)
         capacity = db.get(UserDailyCapacity, user.id)
         assert capacity is not None
         assert capacity.daily_capacity_points == 4
