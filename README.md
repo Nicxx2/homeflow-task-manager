@@ -196,7 +196,7 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.6.1
+## What is new in v2.6.1 and v2.6
 
 - Ask AI now handles more task and capacity questions with safer filtering for active, completed, personal, team, unassigned, dated, and member-specific tasks.
 - Ask AI remains safe by default: task creation, moving, editing, and deletion are kept in the normal task forms and Planner flows where confirmations and capacity checks already exist.
@@ -205,8 +205,6 @@ If someone is away or has blocked days
 - Planner now includes quick task creation from a selected day, with assignee choice, optional recurring settings, capacity review, and self extra-capacity confirmation when needed.
 - Tasks and Day View now support member-specific filters for quickly checking one person's work without changing the main views.
 
-### Also added in v2.6.0
-
 - New web Planner view for week and month planning, with quick task moves and a mobile-friendly date picker flow.
 - Planner capacity checks protect shared schedules, so team tasks cannot be moved into a full day unless the rules allow it.
 - Users can explicitly add extra capacity for their own over-capacity Planner moves after reviewing the change.
@@ -214,7 +212,7 @@ If someone is away or has blocked days
 - Overdue recurring tasks now advance cleanly to the next valid future occurrence instead of creating catch-up tasks in the past.
 - Planner and recurring-task edge cases now include safer stale-confirmation, away-day, blocked-date, completed-task, and permission checks.
 
-### Also added in v2.5.4
+### Previous v2.5.4 highlights
 
 - Web Easy Logon lets a trusted browser remember one approved profile per device, with a rolling 30-day expiry and a remove option.
 - Web admins can optionally allow approved members to update visible task statuses while keeping edit, delete, assignment, and schedule controls unchanged.
