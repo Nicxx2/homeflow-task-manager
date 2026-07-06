@@ -5,11 +5,24 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from backend.app.models.enums import EffortLevel
 
 
+class PlannerMoveOutRequest(BaseModel):
+    task_id: int
+    assignment_date: date
+
+    @field_validator("task_id")
+    @classmethod
+    def task_id_must_be_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Task ID must be positive.")
+        return value
+
+
 class PlannerMoveRequest(BaseModel):
     task_ids: list[int] = Field(min_length=1, max_length=50)
     assignment_date: date
     fingerprint: str | None = None
     add_extra_capacity: bool = False
+    move_out: list[PlannerMoveOutRequest] = Field(default_factory=list, max_length=50)
 
     @field_validator("task_ids")
     @classmethod
@@ -17,6 +30,18 @@ class PlannerMoveRequest(BaseModel):
         unique_values = list(dict.fromkeys(values))
         if any(value <= 0 for value in unique_values):
             raise ValueError("Task IDs must be positive.")
+        return unique_values
+
+    @field_validator("move_out")
+    @classmethod
+    def move_out_tasks_must_be_unique(cls, values: list[PlannerMoveOutRequest]) -> list[PlannerMoveOutRequest]:
+        seen = set()
+        unique_values = []
+        for item in values:
+            if item.task_id in seen:
+                continue
+            seen.add(item.task_id)
+            unique_values.append(item)
         return unique_values
 
 

@@ -2561,6 +2561,40 @@ def planner_move_commit(
     return JSONResponse(result, status_code=status.HTTP_200_OK if result["ok"] else status.HTTP_400_BAD_REQUEST)
 
 
+@router.post("/planner/prioritize/preview")
+def planner_prioritize_preview(
+    payload: PlannerMoveRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = PlannerService(db).preview_prioritize(
+        task_ids=payload.task_ids,
+        assignment_date=payload.assignment_date,
+        viewer=user,
+        move_out=[{"task_id": item.task_id, "assignment_date": item.assignment_date} for item in payload.move_out],
+    )
+    status_code = status.HTTP_200_OK if result["ok"] or result.get("can_add_extra_capacity") or result.get("make_room_candidates") else status.HTTP_400_BAD_REQUEST
+    return JSONResponse(result, status_code=status_code)
+
+
+@router.post("/planner/prioritize/commit")
+def planner_prioritize_commit(
+    payload: PlannerMoveRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = PlannerService(db).commit_prioritize(
+        task_ids=payload.task_ids,
+        assignment_date=payload.assignment_date,
+        fingerprint=payload.fingerprint or "",
+        viewer=user,
+        move_out=[{"task_id": item.task_id, "assignment_date": item.assignment_date} for item in payload.move_out],
+        add_extra_capacity=payload.add_extra_capacity,
+    )
+    if result.get("conflict"):
+        return JSONResponse(result, status_code=status.HTTP_409_CONFLICT)
+    return JSONResponse(result, status_code=status.HTTP_200_OK if result["ok"] else status.HTTP_400_BAD_REQUEST)
+
 @router.post("/planner/tasks/preview")
 def planner_task_create_preview(
     payload: PlannerTaskCreateRequest,

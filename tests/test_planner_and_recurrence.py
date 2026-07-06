@@ -420,12 +420,12 @@ def test_planner_rejects_stale_confirmation_without_partial_move():
         db.close()
 
 
-def test_planner_non_admin_cannot_move_another_users_task():
+def test_planner_active_member_can_move_another_users_task_when_capacity_fits():
     db = SessionLocal()
     try:
         _ensure_effort_config(db)
         viewer = _create_user(db)
-        assignee = _create_user(db)
+        assignee = _create_user(db, capacity=4)
         today = date.today()
         destination = today + timedelta(days=2)
         task = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Other user task", day=today)
@@ -443,13 +443,45 @@ def test_planner_non_admin_cannot_move_another_users_task():
             viewer=viewer,
         )
 
+        assert preview["ok"] is True
+        assert preview["can_add_extra_capacity"] is False
+        assert result["ok"] is True
+        assert db.get(Task, task.id).assignment_date == destination
+    finally:
+        db.close()
+def test_planner_pending_member_cannot_move_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db)
+        viewer.approval_status = AuthService.APPROVAL_PENDING
+        db.add(viewer)
+        db.commit()
+        db.refresh(viewer)
+        assignee = _create_user(db, capacity=4)
+        today = date.today()
+        destination = today + timedelta(days=2)
+        task = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Pending move", day=today)
+        service = PlannerService(db)
+
+        preview = service.preview_move(
+            task_ids=[task.id],
+            assignment_date=destination,
+            viewer=viewer,
+        )
+        result = service.commit_move(
+            task_ids=[task.id],
+            assignment_date=destination,
+            fingerprint=preview["fingerprint"],
+            viewer=viewer,
+        )
+
         assert preview["ok"] is False
-        assert any("only the assignee or an admin" in error for error in preview["errors"])
+        assert any("only approved active members" in error for error in preview["errors"])
         assert result["ok"] is False
         assert db.get(Task, task.id).assignment_date == today
     finally:
         db.close()
-
 
 def test_planner_admin_can_move_another_users_task_when_capacity_fits():
     db = SessionLocal()
@@ -552,12 +584,12 @@ def test_planner_extra_capacity_override_is_only_for_own_tasks():
     finally:
         db.close()
 
-def test_planner_api_rejects_other_users_task_for_non_admin():
+def test_planner_api_allows_active_member_to_move_another_users_task_when_capacity_fits():
     db = SessionLocal()
     try:
         _ensure_effort_config(db)
         viewer = _create_user(db)
-        assignee = _create_user(db)
+        assignee = _create_user(db, capacity=4)
         today = date.today()
         destination = today + timedelta(days=2)
         task = _create_assigned_task(db, creator=viewer, assignee=assignee, title="API other user task", day=today)
@@ -574,18 +606,17 @@ def test_planner_api_rejects_other_users_task_for_non_admin():
                 "task_ids": [task.id],
                 "assignment_date": destination.isoformat(),
                 "fingerprint": preview["fingerprint"],
-                "add_extra_capacity": True,
             },
         )
 
-        assert preview_response.status_code == 400
-        assert any("only the assignee or an admin" in error for error in preview["errors"])
-        assert commit_response.status_code == 400
+        assert preview_response.status_code == 200
+        assert preview["ok"] is True
+        assert preview["can_add_extra_capacity"] is False
+        assert commit_response.status_code == 200
         db.expire_all()
-        assert db.get(Task, task.id).assignment_date == today
+        assert db.get(Task, task.id).assignment_date == destination
     finally:
         db.close()
-
 
 def test_planner_extra_capacity_rejects_stale_confirmation_without_extra_override():
     db = SessionLocal()
@@ -761,6 +792,9 @@ def test_planner_member_filter_shows_only_selected_visible_member():
         assert f'data-selected-member-id="{visible_member.id}"' in response.text
         assert f'value="{visible_member.id}" selected' in response.text
         assert "Visible member task" in response.text
+        visible_task_index = response.text.index(f'data-task-id="{visible_task.id}"')
+        visible_task_markup = response.text[visible_task_index - 250 : visible_task_index + 250]
+        assert 'data-movable="true"' in visible_task_markup
         assert "Own planner task" not in response.text
         assert "Hidden member task" not in response.text
         assert f"scope=member&amp;member_id={visible_member.id}" in response.text
@@ -1263,3 +1297,294 @@ def test_edit_form_completion_advances_recurring_root_once():
     finally:
         db.close()
 
+
+
+def test_planner_prioritize_can_make_room_by_moving_selected_tasks_out():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=4)
+        target = date.today() + timedelta(days=1)
+        destination = target + timedelta(days=1)
+        keep_on_target = _create_assigned_task(db, creator=user, assignee=user, title="Keep on target", day=target)
+        move_out = _create_assigned_task(db, creator=user, assignee=user, title="Move out for priority", day=target)
+        priority = _create_assigned_task(db, creator=user, assignee=user, title="Priority work", day=target + timedelta(days=7))
+        service = PlannerService(db)
+
+        initial = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=user,
+        )
+        assert initial["ok"] is False
+        assert initial["capacity_gap"] == 2
+        assert initial["capacity_gaps"] == [{"user_id": user.id, "name": user.full_name, "points": 2}]
+        assert initial["priority_tasks"][0]["id"] == priority.id
+        assert {item["id"] for item in initial["make_room_candidates"]} >= {keep_on_target.id, move_out.id}
+
+        move_out_payload = [{"task_id": move_out.id, "assignment_date": destination}]
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=user,
+            move_out=move_out_payload,
+        )
+        result = service.commit_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            fingerprint=preview["fingerprint"],
+            viewer=user,
+            move_out=move_out_payload,
+        )
+
+        assert preview["ok"] is True
+        assert preview["move_out_count"] == 1
+        assert result["ok"] is True
+        assert result["moved_count"] == 1
+        assert result["moved_out_count"] == 1
+        assert db.get(Task, priority.id).assignment_date == target
+        assert db.get(Task, move_out.id).assignment_date == destination
+        assert db.get(Task, keep_on_target.id).assignment_date == target
+    finally:
+        db.close()
+
+
+def test_planner_prioritize_rejects_full_move_out_destination_without_partial_move():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=4)
+        target = date.today() + timedelta(days=1)
+        full_destination = target + timedelta(days=1)
+        move_out = _create_assigned_task(db, creator=user, assignee=user, title="Cannot move out", day=target)
+        _create_assigned_task(db, creator=user, assignee=user, title="Destination full one", day=full_destination)
+        _create_assigned_task(db, creator=user, assignee=user, title="Destination full two", day=full_destination)
+        priority = _create_assigned_task(db, creator=user, assignee=user, title="Priority into target", day=target + timedelta(days=7))
+        service = PlannerService(db)
+        move_out_payload = [{"task_id": move_out.id, "assignment_date": full_destination}]
+
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=user,
+            move_out=move_out_payload,
+        )
+        result = service.commit_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            fingerprint=preview["fingerprint"],
+            viewer=user,
+            move_out=move_out_payload,
+        )
+
+        assert preview["ok"] is False
+        assert any("needs 6 points" in error for error in preview["errors"])
+        assert result["ok"] is False
+        assert db.get(Task, priority.id).assignment_date == target + timedelta(days=7)
+        assert db.get(Task, move_out.id).assignment_date == target
+    finally:
+        db.close()
+
+
+def test_planner_prioritize_extra_capacity_reports_added_points():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        user = _create_user(db, capacity=2)
+        target = date.today() + timedelta(days=1)
+        _create_assigned_task(db, creator=user, assignee=user, title="Target already full", day=target)
+        priority = _create_assigned_task(db, creator=user, assignee=user, title="Priority needs extra", day=target + timedelta(days=4))
+        service = PlannerService(db)
+
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=user,
+        )
+        result = service.commit_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            fingerprint=preview["fingerprint"],
+            viewer=user,
+            add_extra_capacity=True,
+        )
+        override = db.get(UserDailyCapacityOverride, {"user_id": user.id, "override_date": target})
+
+        assert preview["ok"] is False
+        assert preview["can_add_extra_capacity"] is True
+        assert preview["extra_capacity_required"] == 2
+        assert result["ok"] is True
+        assert result["extra_capacity_added"] == 2
+        assert override is not None
+        assert override.extra_capacity_points == 2
+        assert db.get(Task, priority.id).assignment_date == target
+    finally:
+        db.close()
+
+
+def test_planner_prioritize_active_member_can_move_another_users_task_when_capacity_fits():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db)
+        assignee = _create_user(db, capacity=4)
+        target = date.today() + timedelta(days=1)
+        priority = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Other priority", day=target + timedelta(days=3))
+        service = PlannerService(db)
+
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=viewer,
+        )
+        result = service.commit_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            fingerprint=preview["fingerprint"],
+            viewer=viewer,
+        )
+
+        assert preview["ok"] is True
+        assert preview["can_add_extra_capacity"] is False
+        assert result["ok"] is True
+        assert db.get(Task, priority.id).assignment_date == target
+    finally:
+        db.close()
+
+def test_planner_prioritize_extra_capacity_is_only_for_own_tasks():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        admin = _create_user(db, is_admin=True)
+        assignee = _create_user(db, capacity=2)
+        target = date.today() + timedelta(days=1)
+        _create_assigned_task(db, creator=admin, assignee=assignee, title="Other target full", day=target)
+        priority = _create_assigned_task(db, creator=admin, assignee=assignee, title="Other priority extra", day=target + timedelta(days=4))
+        service = PlannerService(db)
+
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=admin,
+        )
+        result = service.commit_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            fingerprint=preview["fingerprint"],
+            viewer=admin,
+            add_extra_capacity=True,
+        )
+        override = db.get(UserDailyCapacityOverride, {"user_id": assignee.id, "override_date": target})
+
+        assert preview["ok"] is False
+        assert preview["can_add_extra_capacity"] is False
+        assert result["ok"] is False
+        assert override is None
+        assert db.get(Task, priority.id).assignment_date == target + timedelta(days=4)
+    finally:
+        db.close()
+
+
+def test_planner_prioritize_active_member_can_make_room_for_another_user_without_extra_capacity():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db)
+        assignee = _create_user(db, capacity=4)
+        target = date.today() + timedelta(days=1)
+        destination = target + timedelta(days=1)
+        stay_on_target = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Other stay target", day=target)
+        move_out = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Other move out", day=target)
+        priority = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Other priority", day=target + timedelta(days=4))
+        service = PlannerService(db)
+        move_out_payload = [{"task_id": move_out.id, "assignment_date": destination}]
+
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=viewer,
+            move_out=move_out_payload,
+        )
+        result = service.commit_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            fingerprint=preview["fingerprint"],
+            viewer=viewer,
+            move_out=move_out_payload,
+        )
+        override = db.get(UserDailyCapacityOverride, {"user_id": assignee.id, "override_date": target})
+
+        assert preview["ok"] is True
+        assert preview["can_add_extra_capacity"] is False
+        assert result["ok"] is True
+        assert result["moved_count"] == 1
+        assert result["moved_out_count"] == 1
+        assert override is None
+        assert db.get(Task, priority.id).assignment_date == target
+        assert db.get(Task, move_out.id).assignment_date == destination
+        assert db.get(Task, stay_on_target.id).assignment_date == target
+    finally:
+        db.close()
+
+
+def test_planner_move_uses_assignee_capacity_not_team_total():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db)
+        assignee = _create_user(db, capacity=2)
+        spare_member = _create_user(db, capacity=10)
+        today = date.today()
+        destination = today + timedelta(days=2)
+        _create_assigned_task(db, creator=viewer, assignee=assignee, title="Assignee full day", day=destination)
+        _create_assigned_task(db, creator=viewer, assignee=spare_member, title="Spare member task", day=destination)
+        moving = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Assignee move", day=today)
+        service = PlannerService(db)
+
+        preview = service.preview_move(
+            task_ids=[moving.id],
+            assignment_date=destination,
+            viewer=viewer,
+        )
+        result = service.commit_move(
+            task_ids=[moving.id],
+            assignment_date=destination,
+            fingerprint=preview["fingerprint"],
+            viewer=viewer,
+        )
+
+        assert preview["ok"] is False
+        assert preview["can_add_extra_capacity"] is False
+        assert any(assignee.full_name in error and "needs 4 points" in error for error in preview["errors"])
+        assert result["ok"] is False
+        assert db.get(Task, moving.id).assignment_date == today
+    finally:
+        db.close()
+
+
+def test_planner_prioritize_make_room_candidates_are_from_affected_assignee():
+    db = SessionLocal()
+    try:
+        _ensure_effort_config(db)
+        viewer = _create_user(db)
+        assignee = _create_user(db, capacity=2)
+        other_member = _create_user(db, capacity=10)
+        target = date.today() + timedelta(days=1)
+        assignee_room = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Assignee room", day=target)
+        other_room = _create_assigned_task(db, creator=viewer, assignee=other_member, title="Other room", day=target)
+        priority = _create_assigned_task(db, creator=viewer, assignee=assignee, title="Assignee priority", day=target + timedelta(days=4))
+        service = PlannerService(db)
+
+        preview = service.preview_prioritize(
+            task_ids=[priority.id],
+            assignment_date=target,
+            viewer=viewer,
+        )
+        candidate_ids = {item["id"] for item in preview["make_room_candidates"]}
+
+        assert preview["ok"] is False
+        assert preview["capacity_gaps"] == [{"user_id": assignee.id, "name": assignee.full_name, "points": 2}]
+        assert assignee_room.id in candidate_ids
+        assert other_room.id not in candidate_ids
+    finally:
+        db.close()

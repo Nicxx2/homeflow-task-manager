@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% macro planner_task(task, compact=false) %}
-  {% set can_move_task = user.is_admin or task.assignee_id == user.id %}
+  {% set can_move_task = user.is_active and (user.is_admin or user.approval_status == "approved") %}
   {% set movable = task.status.value != "completed" and not task.recurrence_parent_id and can_move_task %}
   <div
     class="planner-task {% if compact %}planner-task-compact hidden sm:block{% endif %} {% if task.status.value == 'completed' %}opacity-60{% elif task.status.value == 'in_progress' %}app-status-progress{% else %}app-surface{% endif %} {% if task.personal_highlight_color %}app-task-highlight{% endif %} rounded-md border px-2.5 py-2"
@@ -22,7 +22,7 @@
       {% elif task.status.value == "completed" %}
       <span class="mt-0.5 h-4 w-4 shrink-0 text-center text-xs text-slate-400" title="Completed">&#10003;</span>
       {% else %}
-      <span class="mt-0.5 h-4 w-4 shrink-0 text-center text-xs text-slate-400" title="Only the assignee or an admin can move this task">&#8722;</span>
+      <span class="mt-0.5 h-4 w-4 shrink-0 text-center text-xs text-slate-400" title="This task cannot be moved in Planner">&#8722;</span>
       {% endif %}
       <div class="min-w-0 flex-1">
         <a
@@ -78,7 +78,9 @@
     body.planner-selection-active #assistant-toggle,
     body.planner-selection-active #assistant-panel,
     body.planner-create-active #assistant-toggle,
-    body.planner-create-active #assistant-panel { display: none !important; }
+    body.planner-create-active #assistant-panel,
+    body.planner-move-active #assistant-toggle,
+    body.planner-move-active #assistant-panel { display: none !important; }
   }
 </style>
 
@@ -289,7 +291,7 @@
 
 <div data-planner-modal class="fixed inset-0 z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="planner-modal-title">
   <button type="button" data-planner-modal-close class="absolute inset-0 bg-slate-950/60" aria-label="Close move review"></button>
-  <section class="app-surface relative z-10 w-full max-w-md rounded-lg border p-5 shadow-2xl">
+  <section class="app-surface relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-lg border p-5 shadow-2xl">
     <div class="flex items-start justify-between gap-3">
       <div>
         <h2 id="planner-modal-title" class="text-lg font-semibold">Review move</h2>
@@ -298,9 +300,10 @@
       <button type="button" data-planner-modal-close class="rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700">Close</button>
     </div>
     <div data-planner-modal-summary class="mt-4 space-y-2"></div>
+    <div data-planner-make-room class="mt-4 space-y-3"></div>
     <div data-planner-modal-warnings class="mt-3 space-y-1 text-xs text-amber-700 dark:text-amber-300"></div>
     <div data-planner-modal-errors class="mt-3 space-y-1 text-xs text-red-700 dark:text-red-300"></div>
-    <div class="mt-5 flex flex-wrap justify-end gap-2">
+    <div class="sticky bottom-0 -mx-5 -mb-5 mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white/95 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/95">
       <button type="button" data-planner-modal-cancel class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">Cancel</button>
       <button type="button" data-planner-confirm-extra class="hidden rounded-md border border-amber-300 px-4 py-2 text-sm text-amber-800 dark:border-amber-700 dark:text-amber-200" disabled>Add extra capacity</button>
       <button type="button" data-planner-confirm class="app-primary-button rounded-md px-4 py-2 text-sm" disabled>Confirm move</button>
@@ -363,6 +366,7 @@
   const modalSummary = modal.querySelector("[data-planner-modal-summary]");
   const modalWarnings = modal.querySelector("[data-planner-modal-warnings]");
   const modalErrors = modal.querySelector("[data-planner-modal-errors]");
+  const modalMakeRoom = modal.querySelector("[data-planner-make-room]");
   const confirmButton = modal.querySelector("[data-planner-confirm]");
   const confirmExtraButton = modal.querySelector("[data-planner-confirm-extra]");
   const createForm = createModal.querySelector("[data-planner-create-form]");
@@ -447,9 +451,13 @@
   function setModalOpen(open) {
     modal.classList.toggle("hidden", !open);
     modal.classList.toggle("flex", open);
+    document.body.classList.toggle("planner-move-active", open);
     if (!open) {
       preview = null;
+      modalMakeRoom.replaceChildren();
+      confirmButton.textContent = "Confirm move";
       confirmButton.disabled = true;
+      confirmExtraButton.textContent = "Add extra capacity";
       confirmExtraButton.disabled = true;
       confirmExtraButton.classList.add("hidden");
     }
@@ -479,70 +487,364 @@
   async function reviewCreate() { if (createPending) return; createPending = true; resetCreateReview("Checking task..."); createReviewButton.disabled = true; try { const response = await fetch("/planner/tasks/preview", { method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(createPayload(false)) }); const payload = await readJson(response); createPreview = payload; renderCreateReview(payload); } catch (error) { createMessage.textContent = "The task could not be checked."; addMessage(createErrors, error.message || "Check your connection and try again."); } finally { createPending = false; createReviewButton.disabled = false; } }
   async function confirmCreate(addExtraCapacity) { const canAddExtraCapacity = Boolean(addExtraCapacity && createPreview && createPreview.can_add_extra_capacity); if (createPending || (!createPreview || (!createPreview.ok && !canAddExtraCapacity))) return; createPending = true; createConfirmButton.disabled = true; createExtraButton.disabled = true; const activeButton = canAddExtraCapacity ? createExtraButton : createConfirmButton; activeButton.textContent = canAddExtraCapacity ? "Adding..." : "Creating..."; try { const response = await fetch("/planner/tasks/create", { method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(createPayload(canAddExtraCapacity)) }); const payload = await readJson(response); if (!response.ok || !payload.ok) { createPreview = payload; renderCreateReview(payload); return; } createMessage.textContent = payload.message || "Task created."; window.location.reload(); } catch (error) { createMessage.textContent = "The task could not be created."; createErrors.replaceChildren(); addMessage(createErrors, error.message || "Check your connection and try again."); } finally { createPending = false; createConfirmButton.textContent = "Create task"; if (createPreview && createPreview.can_add_extra_capacity && createPreview.extra_capacity_required > 0) { createExtraButton.textContent = "Add " + createPreview.extra_capacity_required + " extra pts"; createExtraButton.disabled = false; } else createExtraButton.textContent = "Add extra capacity"; if (createPreview && createPreview.ok) createConfirmButton.disabled = false; } }
 
-  async function reviewMove(assignmentDate) {
-    if (!selected.size || pending) return;
-    pending = true;
+  function capacityText(row) {
+    if (row.capacity == null) return row.projected_points + " pts - capacity unset";
+    if (row.remaining < 0) return row.projected_points + " / " + row.capacity + " pts - " + Math.abs(row.remaining) + " over";
+    return row.projected_points + " / " + row.capacity + " pts - " + row.remaining + " left";
+  }
+
+  function formatShortDate(value) {
+    const parts = String(value || "").split("-");
+    if (parts.length !== 3) return String(value || "");
+    const localDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return localDate.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  }
+
+  function resetMoveReview(message) {
     preview = null;
-    modalMessage.textContent = "Checking capacity...";
+    modalMessage.textContent = message || "Checking capacity...";
     modalSummary.replaceChildren();
+    modalMakeRoom.replaceChildren();
     modalWarnings.replaceChildren();
     modalErrors.replaceChildren();
+    modalErrors.classList.remove("hidden");
+    confirmButton.textContent = "Confirm move";
     confirmButton.disabled = true;
     confirmExtraButton.disabled = true;
     confirmExtraButton.classList.add("hidden");
     confirmExtraButton.textContent = "Add extra capacity";
+  }
+
+  function createSummarySection(titleText) {
+    const section = document.createElement("section");
+    section.className = "rounded-lg border border-slate-200 p-3 dark:border-slate-700";
+    const title = document.createElement("p");
+    title.className = "text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400";
+    title.textContent = titleText;
+    const body = document.createElement("div");
+    body.className = "mt-2 space-y-2";
+    section.append(title, body);
+    modalSummary.appendChild(section);
+    return body;
+  }
+
+  function taskMeta(task) {
+    const parts = [];
+    if (task.points != null) parts.push(task.points + " pts");
+    if (task.assignee_name) parts.push(task.assignee_name);
+    return parts.join(" - ");
+  }
+
+  function appendTaskSummary(container, task, suffixText) {
+    const row = document.createElement("div");
+    row.className = "flex min-w-0 flex-col gap-1 rounded-md bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900/60 sm:flex-row sm:items-center sm:justify-between";
+    const title = document.createElement("span");
+    title.className = "min-w-0 truncate font-medium";
+    title.textContent = (task.title || "Task") + (suffixText ? " -> " + suffixText : "");
+    const meta = document.createElement("span");
+    meta.className = "shrink-0 text-xs text-slate-500 dark:text-slate-400";
+    meta.textContent = taskMeta(task);
+    row.append(title, meta);
+    container.appendChild(row);
+  }
+
+  function appendCapacitySummary(container, labelText, rowData) {
+    const row = document.createElement("div");
+    row.className = "flex flex-col gap-1 px-1 text-xs text-slate-500 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between";
+    const label = document.createElement("span");
+    label.className = "min-w-0 truncate";
+    label.textContent = labelText;
+    const detail = document.createElement("span");
+    detail.className = "shrink-0";
+    detail.textContent = capacityText(rowData);
+    row.append(label, detail);
+    container.appendChild(row);
+  }
+
+  function makeRoomRows() {
+    return Array.from(modalMakeRoom.querySelectorAll("[data-make-room-row]"));
+  }
+
+  function collectMoveOut() {
+    return makeRoomRows().reduce(function(items, row) {
+      const checkbox = row.querySelector("[data-make-room-check]");
+      const dateInput = row.querySelector("[data-make-room-date]");
+      if (checkbox && checkbox.checked) {
+        items.push({ task_id: Number(checkbox.value), assignment_date: String(dateInput ? dateInput.value : "") });
+      }
+      return items;
+    }, []);
+  }
+
+  function makeRoomSelectionInvalid() {
+    if (!preview) return true;
+    return makeRoomRows().some(function(row) {
+      const checkbox = row.querySelector("[data-make-room-check]");
+      const dateInput = row.querySelector("[data-make-room-date]");
+      return Boolean(checkbox && checkbox.checked && (!dateInput || !dateInput.value || dateInput.value === preview.assignment_date));
+    });
+  }
+
+  function updateMakeRoomAction() {
+    if (!preview) return;
+    const rows = makeRoomRows();
+    const checkedRows = rows.filter(function(row) {
+      const checkbox = row.querySelector("[data-make-room-check]");
+      return Boolean(checkbox && checkbox.checked);
+    });
+    const selectedPoints = checkedRows.reduce(function(total, row) { return total + Number(row.dataset.points || 0); }, 0);
+    const selectedByUser = checkedRows.reduce(function(points, row) {
+      const assigneeId = row.dataset.assigneeId || "";
+      if (!assigneeId) return points;
+      points[assigneeId] = (points[assigneeId] || 0) + Number(row.dataset.points || 0);
+      return points;
+    }, {});
+    const invalid = makeRoomSelectionInvalid();
+    const gaps = Array.isArray(preview.capacity_gaps) ? preview.capacity_gaps : [];
+    const totalGap = Number(preview.capacity_gap || 0);
+    let remainingGap = totalGap;
+    if (gaps.length) {
+      remainingGap = gaps.reduce(function(total, gap) {
+        return total + Math.max(0, Number(gap.points || 0) - Number(selectedByUser[String(gap.user_id)] || 0));
+      }, 0);
+    } else if (totalGap > 0) {
+      remainingGap = Math.max(0, totalGap - selectedPoints);
+    }
+    const targetCanBeCovered = totalGap > 0 || (preview.make_room_candidates || []).length > 0;
+    const enoughRoom = checkedRows.length > 0 && !invalid && targetCanBeCovered && remainingGap <= 0;
+    const status = modalMakeRoom.querySelector("[data-make-room-status]");
+    const chip = modalMakeRoom.querySelector("[data-make-room-chip]");
+    const chipBase = "shrink-0 rounded-full border px-2 py-1 text-xs";
+    if (chip) {
+      if (invalid) {
+        chip.className = chipBase + " border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300";
+        chip.textContent = "Check dates";
+      } else if (enoughRoom) {
+        chip.className = chipBase + " border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300";
+        chip.textContent = "Enough room";
+      } else if (remainingGap > 0) {
+        chip.className = chipBase + " border-slate-300 text-slate-500 dark:border-slate-700 dark:text-slate-400";
+        chip.textContent = checkedRows.length ? "Need " + remainingGap + " more pts" : "Need " + remainingGap + " pts";
+      } else {
+        chip.className = chipBase + " border-slate-300 text-slate-500 dark:border-slate-700 dark:text-slate-400";
+        chip.textContent = "Review";
+      }
+    }
+    if (status) {
+      if (!checkedRows.length) status.textContent = "Choose task(s) to move out.";
+      else if (invalid) status.textContent = "Choose a different date from today onward for each moved-out task.";
+      else if (enoughRoom) status.textContent = "Enough room selected. Review before saving.";
+      else status.textContent = selectedPoints + " pts selected to move out.";
+    }
+    const hideExtraChoice = enoughRoom && targetCanBeCovered;
+    const hideCapacityMessage = hideExtraChoice && !preview.move_out_count;
+    modalErrors.classList.toggle("hidden", hideCapacityMessage);
+    modalWarnings.querySelectorAll("[data-extra-capacity-warning]").forEach(function(item) {
+      item.classList.toggle("hidden", hideExtraChoice);
+    });
+    if (preview.can_add_extra_capacity && preview.extra_capacity_required > 0) {
+      confirmExtraButton.classList.toggle("hidden", hideExtraChoice);
+      confirmExtraButton.disabled = Boolean(hideExtraChoice || pending);
+    }
+    const canReviewMoveOut = (preview.make_room_candidates || []).length || (preview.move_out_count && rows.length);
+    if (!preview.ok && canReviewMoveOut) {
+      confirmButton.textContent = "Review room";
+      confirmButton.disabled = pending || !checkedRows.length || invalid;
+    }
+  }
+
+  function renderMakeRoom(payload) {
+    modalMakeRoom.replaceChildren();
+    let candidates = payload.make_room_candidates || [];
+    let isAdjustingMoveOut = false;
+    if (!candidates.length && !payload.ok && payload.move_out_count && Array.isArray(payload.destinations)) {
+      candidates = [];
+      payload.destinations.forEach(function(destination) {
+        (destination.tasks || []).forEach(function(task) {
+          candidates.push(Object.assign({}, task, {
+            suggested_date: destination.assignment_date,
+            is_selected: true
+          }));
+        });
+      });
+      isAdjustingMoveOut = candidates.length > 0;
+    }
+    if (!candidates.length) return;
+
+    const section = document.createElement("section");
+    section.className = "rounded-lg border border-slate-200 p-3 dark:border-slate-700";
+    const header = document.createElement("div");
+    header.className = "flex items-start justify-between gap-3";
+    const copy = document.createElement("div");
+    const title = document.createElement("p");
+    title.className = "text-sm font-medium";
+    title.textContent = isAdjustingMoveOut ? "Adjust move-out dates" : "Make room";
+    const help = document.createElement("p");
+    help.className = "mt-1 text-xs text-slate-500 dark:text-slate-400";
+    help.textContent = isAdjustingMoveOut ? "Choose a different date from today onward, then review again." : "Choose existing tasks from this date to move out, then review again.";
+    copy.append(title, help);
+    const gap = document.createElement("span");
+    gap.dataset.makeRoomChip = "true";
+    gap.className = "shrink-0 rounded-full border border-slate-300 px-2 py-1 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400";
+    gap.textContent = isAdjustingMoveOut ? "Review" : "Need " + (payload.capacity_gap || 0) + " pts";
+    header.append(copy, gap);
+    section.appendChild(header);
+
+    const list = document.createElement("div");
+    list.className = "mt-3 space-y-2";
+    candidates.forEach(function(candidate) {
+      const row = document.createElement("div");
+      row.className = "rounded-md border border-slate-200 p-3 dark:border-slate-700";
+      row.dataset.makeRoomRow = "true";
+      row.dataset.points = String(candidate.points || 0);
+      row.dataset.assigneeId = String(candidate.assignee_id || "");
+
+      const grid = document.createElement("div");
+      grid.className = "grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-end";
+      const choice = document.createElement("label");
+      choice.className = "flex min-w-0 items-start gap-3";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = String(candidate.id);
+      checkbox.dataset.makeRoomCheck = "true";
+      checkbox.className = "mt-1 h-4 w-4 shrink-0";
+      checkbox.checked = Boolean(candidate.is_selected);
+      const text = document.createElement("span");
+      text.className = "min-w-0";
+      const itemTitle = document.createElement("span");
+      itemTitle.className = "block truncate text-sm font-medium";
+      itemTitle.textContent = candidate.title || "Task";
+      const meta = document.createElement("span");
+      meta.className = "mt-1 block text-xs text-slate-500 dark:text-slate-400";
+      meta.textContent = (candidate.points || 0) + " pts" + (candidate.assignee_name ? " - " + candidate.assignee_name : "") + (candidate.is_in_progress ? " - in progress" : "");
+      text.append(itemTitle, meta);
+      choice.append(checkbox, text);
+
+      const dateLabel = document.createElement("label");
+      dateLabel.className = "block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400";
+      dateLabel.textContent = "Move to";
+      const dateInput = document.createElement("input");
+      dateInput.type = "date";
+      dateInput.min = root.dataset.today || "";
+      dateInput.value = candidate.suggested_date || "";
+      dateInput.dataset.makeRoomDate = "true";
+      dateInput.className = "app-input mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm normal-case tracking-normal dark:border-slate-700 dark:bg-slate-800";
+      dateLabel.appendChild(dateInput);
+
+      grid.append(choice, dateLabel);
+      row.appendChild(grid);
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+
+    const status = document.createElement("p");
+    status.dataset.makeRoomStatus = "true";
+    status.className = "mt-3 text-xs text-slate-500 dark:text-slate-400";
+    section.appendChild(status);
+    section.addEventListener("change", updateMakeRoomAction);
+    section.addEventListener("input", updateMakeRoomAction);
+    modalMakeRoom.appendChild(section);
+    updateMakeRoomAction();
+  }
+
+  function renderMoveReview(payload) {
+    modalMessage.textContent = payload.message || "Move review ready.";
+    modalSummary.replaceChildren();
+    modalWarnings.replaceChildren();
+    modalErrors.replaceChildren();
+    modalMakeRoom.replaceChildren();
+    modalErrors.classList.remove("hidden");
+    confirmButton.textContent = payload.move_out_count ? "Confirm changes" : "Confirm move";
+    confirmButton.disabled = !payload.ok;
+    confirmExtraButton.disabled = true;
+    confirmExtraButton.classList.add("hidden");
+    confirmExtraButton.textContent = "Add extra capacity";
+
+    const moveInTasks = payload.priority_tasks || [];
+    if (moveInTasks.length) {
+      const moveIn = createSummarySection("Move in");
+      moveInTasks.forEach(function(task) { appendTaskSummary(moveIn, task); });
+      (payload.members || []).forEach(function(member) {
+        appendCapacitySummary(moveIn, member.name, member);
+      });
+    } else if ((payload.members || []).length) {
+      const capacityOnly = createSummarySection("Capacity");
+      (payload.members || []).forEach(function(member) {
+        appendCapacitySummary(capacityOnly, member.name, member);
+      });
+    }
+
+    const destinations = payload.destinations || [];
+    if (destinations.length) {
+      const moveOut = createSummarySection("Move out");
+      destinations.forEach(function(destination) {
+        (destination.tasks || []).forEach(function(task) {
+          appendTaskSummary(moveOut, task, formatShortDate(destination.assignment_date));
+        });
+        appendCapacitySummary(moveOut, formatShortDate(destination.assignment_date), destination);
+      });
+    }
+
+    (payload.warnings || []).forEach(function(item) { addMessage(modalWarnings, item); });
+    if (payload.can_add_extra_capacity && payload.extra_capacity_required > 0) {
+      const extraWarning = document.createElement("p");
+      extraWarning.dataset.extraCapacityWarning = "true";
+      extraWarning.textContent = "Adds " + payload.extra_capacity_required + " extra capacity point" + (payload.extra_capacity_required === 1 ? "" : "s") + " to this day.";
+      modalWarnings.appendChild(extraWarning);
+      confirmExtraButton.textContent = "Add " + payload.extra_capacity_required + " extra pts";
+      confirmExtraButton.classList.remove("hidden");
+      confirmExtraButton.disabled = false;
+    }
+    normalizeErrors(payload).forEach(function(item) { addMessage(modalErrors, item); });
+    renderMakeRoom(payload);
+  }
+
+  async function reviewMove(assignmentDate, moveOut) {
+    if (!selected.size || pending || !assignmentDate) return;
+    pending = true;
+    resetMoveReview("Checking capacity...");
     setModalOpen(true);
 
     hideTitleTooltip();
     try {
-      const response = await fetch("/planner/move/preview", {
+      const response = await fetch("/planner/prioritize/preview", {
         method: "POST",
         credentials: "same-origin",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           task_ids: Array.from(selected),
-          assignment_date: assignmentDate
+          assignment_date: String(assignmentDate),
+          move_out: Array.isArray(moveOut) ? moveOut : []
         })
       });
       const payload = await readJson(response);
       preview = payload;
-      modalMessage.textContent = payload.message || "Move review ready.";
-
-      (payload.members || []).forEach(function(member) {
-        const row = document.createElement("div");
-        row.className = "flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700";
-        const name = document.createElement("span");
-        name.textContent = member.name;
-        const capacity = document.createElement("span");
-        capacity.className = "text-xs text-slate-500 dark:text-slate-400";
-        if (member.capacity == null) {
-          capacity.textContent = member.projected_points + " pts - capacity unset";
-        } else if (member.remaining < 0) {
-          capacity.textContent = member.projected_points + " / " + member.capacity + " pts - " + Math.abs(member.remaining) + " over";
-        } else {
-          capacity.textContent = member.projected_points + " / " + member.capacity + " pts - " + member.remaining + " left";
-        }
-        row.append(name, capacity);
-        modalSummary.appendChild(row);
-      });
-      (payload.warnings || []).forEach(function(item) { addMessage(modalWarnings, item); });
-      if (payload.can_add_extra_capacity && payload.extra_capacity_required > 0) {
-        addMessage(modalWarnings, "Adds " + payload.extra_capacity_required + " extra capacity point" + (payload.extra_capacity_required === 1 ? "" : "s") + " to this day.");
-        confirmExtraButton.textContent = "Add " + payload.extra_capacity_required + " extra pts";
-        confirmExtraButton.classList.remove("hidden");
-        confirmExtraButton.disabled = false;
-      }
-      (payload.errors || []).forEach(function(item) { addMessage(modalErrors, item); });
-      confirmButton.disabled = !payload.ok;
+      renderMoveReview(payload);
     } catch (error) {
       modalMessage.textContent = "The move could not be checked.";
       addMessage(modalErrors, error.message || "Check your connection and try again.");
     } finally {
       pending = false;
+      updateMakeRoomAction();
     }
   }
 
   async function confirmMove(addExtraCapacity) {
+    const selectedMoveOut = collectMoveOut();
+    const canReviewMoveOut = Boolean(preview && ((preview.make_room_candidates || []).length || preview.move_out_count));
+    if (!addExtraCapacity && preview && !preview.ok && canReviewMoveOut && selectedMoveOut.length) {
+      if (makeRoomSelectionInvalid()) {
+        updateMakeRoomAction();
+        return;
+      }
+      await reviewMove(preview.assignment_date, selectedMoveOut);
+      return;
+    }
+    if (!addExtraCapacity && preview && !preview.ok && canReviewMoveOut) {
+      updateMakeRoomAction();
+      return;
+    }
+
     const canAddExtraCapacity = Boolean(addExtraCapacity && preview && preview.can_add_extra_capacity);
     if (!preview || pending || (!preview.ok && !canAddExtraCapacity)) return;
     pending = true;
@@ -551,7 +853,7 @@
     const activeButton = canAddExtraCapacity ? confirmExtraButton : confirmButton;
     activeButton.textContent = canAddExtraCapacity ? "Adding..." : "Moving...";
     try {
-      const response = await fetch("/planner/move/commit", {
+      const response = await fetch("/planner/prioritize/commit", {
         method: "POST",
         credentials: "same-origin",
         headers: {"Content-Type": "application/json"},
@@ -559,15 +861,14 @@
           task_ids: Array.from(selected),
           assignment_date: preview.assignment_date,
           fingerprint: preview.fingerprint,
-          add_extra_capacity: canAddExtraCapacity
+          add_extra_capacity: canAddExtraCapacity,
+          move_out: Array.isArray(preview.move_out) ? preview.move_out : []
         })
       });
       const payload = await readJson(response);
       if (!response.ok || !payload.ok) {
-        modalMessage.textContent = payload.message || "The move could not be saved.";
-        modalErrors.replaceChildren();
-        (payload.errors || []).forEach(function(item) { addMessage(modalErrors, item); });
-        preview = null;
+        preview = payload;
+        renderMoveReview(payload);
         return;
       }
       modalMessage.textContent = payload.message;
@@ -576,16 +877,18 @@
       modalMessage.textContent = "The move could not be saved.";
       modalErrors.replaceChildren();
       addMessage(modalErrors, error.message || "Check your connection and try again.");
-    } finally {
-      pending = false;
-      confirmButton.textContent = "Confirm move";
+      if (preview && preview.ok) {
+        confirmButton.textContent = preview.move_out_count ? "Confirm changes" : "Confirm move";
+        confirmButton.disabled = false;
+      }
       if (preview && preview.can_add_extra_capacity && preview.extra_capacity_required > 0) {
         confirmExtraButton.textContent = "Add " + preview.extra_capacity_required + " extra pts";
+        confirmExtraButton.classList.remove("hidden");
         confirmExtraButton.disabled = false;
-      } else {
-        confirmExtraButton.textContent = "Add extra capacity";
       }
-      if (preview && preview.ok) confirmButton.disabled = false;
+    } finally {
+      pending = false;
+      updateMakeRoomAction();
     }
   }
 
