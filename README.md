@@ -196,7 +196,7 @@ If someone is away or has blocked days
 
 ---
 
-## What is new in v2.6.4
+## What is new in v2.6.5
 
 - Planner can now move selected tasks with a make-room review, allowing approved members to rearrange work safely while capacity stays checked per person and extra capacity remains self-only.
 - Ask AI now handles more task and capacity questions with safer filtering for active, completed, personal, team, unassigned, dated, and member-specific tasks.

@@ -72,6 +72,21 @@
     pointer-events: none;
     white-space: normal;
   }
+  [data-planner-confirm]:disabled,
+  [data-planner-create-confirm]:disabled,
+  [data-planner-confirm-extra]:disabled,
+  [data-planner-create-extra]:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+    transform: none;
+  }
+  [data-planner-confirm]:disabled:hover,
+  [data-planner-create-confirm]:disabled:hover,
+  [data-planner-confirm-extra]:disabled:hover,
+  [data-planner-create-extra]:disabled:hover {
+    filter: none;
+    transform: none;
+  }
   @media (max-width: 639px) {
     [data-planner-root].planner-has-selection { padding-bottom: 20rem; }
     [data-planner-selection-bar] { max-height: min(17rem, calc(100vh - 2rem)); overflow-y: auto; }
@@ -576,6 +591,40 @@
     }, []);
   }
 
+  function reviewedMoveOut() {
+    return Array.isArray(preview && preview.move_out) ? preview.move_out : [];
+  }
+
+  function normalizeMoveOut(items) {
+    return (Array.isArray(items) ? items : [])
+      .filter(function(item) { return item && item.task_id && item.assignment_date; })
+      .map(function(item) { return { task_id: Number(item.task_id), assignment_date: String(item.assignment_date) }; })
+      .sort(function(left, right) { return left.task_id - right.task_id || left.assignment_date.localeCompare(right.assignment_date); });
+  }
+
+  function sameMoveOut(left, right) {
+    return JSON.stringify(normalizeMoveOut(left)) === JSON.stringify(normalizeMoveOut(right));
+  }
+
+  function makeRoomMode() {
+    const section = modalMakeRoom.querySelector("[data-make-room-mode]");
+    return section ? section.dataset.makeRoomMode : "";
+  }
+
+  function nextMoveOutForReview() {
+    const selected = collectMoveOut();
+    const reviewed = reviewedMoveOut();
+    if (makeRoomMode() === "adjust") return selected;
+    const byTask = new Map();
+    reviewed.forEach(function(item) { byTask.set(Number(item.task_id), { task_id: Number(item.task_id), assignment_date: String(item.assignment_date) }); });
+    selected.forEach(function(item) { byTask.set(Number(item.task_id), item); });
+    return Array.from(byTask.values());
+  }
+
+  function makeRoomNeedsReview() {
+    return makeRoomRows().length > 0 && !sameMoveOut(nextMoveOutForReview(), reviewedMoveOut());
+  }
+
   function makeRoomSelectionInvalid() {
     if (!preview) return true;
     return makeRoomRows().some(function(row) {
@@ -643,8 +692,12 @@
       item.classList.toggle("hidden", hideExtraChoice);
     });
     if (preview.can_add_extra_capacity && preview.extra_capacity_required > 0) {
-      confirmExtraButton.classList.toggle("hidden", hideExtraChoice);
-      confirmExtraButton.disabled = Boolean(hideExtraChoice || pending);
+      const adjustedExtraRequired = remainingGap > 0 ? remainingGap : Number(preview.extra_capacity_required || 0);
+      confirmExtraButton.classList.toggle("hidden", hideExtraChoice || adjustedExtraRequired <= 0);
+      confirmExtraButton.disabled = Boolean(hideExtraChoice || adjustedExtraRequired <= 0 || invalid || pending);
+      confirmExtraButton.textContent = makeRoomNeedsReview()
+        ? "Review for " + adjustedExtraRequired + " extra pts"
+        : "Add " + adjustedExtraRequired + " extra pts";
     }
     const canReviewMoveOut = (preview.make_room_candidates || []).length || (preview.move_out_count && rows.length);
     if (!preview.ok && canReviewMoveOut) {
@@ -672,6 +725,7 @@
     if (!candidates.length) return;
 
     const section = document.createElement("section");
+    section.dataset.makeRoomMode = isAdjustingMoveOut ? "adjust" : "add";
     section.className = "rounded-lg border border-slate-200 p-3 dark:border-slate-700";
     const header = document.createElement("div");
     header.className = "flex items-start justify-between gap-3";
@@ -830,14 +884,13 @@
   }
 
   async function confirmMove(addExtraCapacity) {
-    const selectedMoveOut = collectMoveOut();
     const canReviewMoveOut = Boolean(preview && ((preview.make_room_candidates || []).length || preview.move_out_count));
-    if (!addExtraCapacity && preview && !preview.ok && canReviewMoveOut && selectedMoveOut.length) {
+    if (preview && canReviewMoveOut && makeRoomNeedsReview()) {
       if (makeRoomSelectionInvalid()) {
         updateMakeRoomAction();
         return;
       }
-      await reviewMove(preview.assignment_date, selectedMoveOut);
+      await reviewMove(preview.assignment_date, nextMoveOutForReview());
       return;
     }
     if (!addExtraCapacity && preview && !preview.ok && canReviewMoveOut) {
